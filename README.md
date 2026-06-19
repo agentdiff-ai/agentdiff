@@ -242,13 +242,21 @@ recommendation:
 Block merge unless the test change is intentional.
 ```
 
-Live adapter stubs exist for:
+Experimental live adapters exist for:
 
 - `codex-cli`
 - `claude-agent-sdk`
 - `openrouter-openai`
 
-They currently degrade gracefully when tools or API keys are missing. Recorded mode is the default demo path.
+They degrade gracefully when tools, SDKs, or API keys are missing. Recorded mode is still the default demo path.
+
+OpenRouter uses an OpenAI-compatible patch-plan harness. It reads `OPENROUTER_API_KEY`, defaults `OPENROUTER_MODEL` to `xiaomi/mimo-v2.5-pro`, and uses `z-ai/glm-5.2` when `OPENROUTER_QUALITY=final`.
+
+```bash
+OPENROUTER_API_KEY=... \
+AGENTDIFF_HARNESS=openrouter-openai \
+node packages/cli/bin/agentdiff.js run --example coding-agent-harness --live
+```
 
 ## Why This Is Different From Eval Dashboards
 

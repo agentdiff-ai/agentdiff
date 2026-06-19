@@ -38,4 +38,20 @@ ANTHROPIC_API_KEY=... node examples/coding-agent-harness/harnesses/claude-agent-
 OPENROUTER_API_KEY=... node examples/coding-agent-harness/harnesses/openrouter-openai.js
 ```
 
+Run through the CLI:
+
+```bash
+AGENTDIFF_HARNESS=openrouter-openai \
+OPENROUTER_API_KEY=... \
+node packages/cli/bin/agentdiff.js run --example coding-agent-harness --live
+```
+
+The OpenRouter harness uses the OpenAI-compatible API and asks the model for a strict JSON patch plan. The model cannot directly edit files or run arbitrary shell commands. The default model is `xiaomi/mimo-v2.5-pro`; use final-quality mode with:
+
+```bash
+OPENROUTER_QUALITY=final OPENROUTER_API_KEY=... AGENTDIFF_HARNESS=openrouter-openai node packages/cli/bin/agentdiff.js run --example coding-agent-harness --live
+```
+
+You can override either path with `OPENROUTER_MODEL` or `OPENROUTER_FINAL_MODEL`.
+
 The product abstraction is the normalized trace, not a specific agent runtime.
