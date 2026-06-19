@@ -292,6 +292,14 @@ npm run zoo
 
 The zoo uses small safe/risky fixture repos to verify that agentdiff catches expected behavior-risk changes without live models, API keys, or external repos. See [docs/agent-zoo.md](docs/agent-zoo.md).
 
+Run the optional live OpenRouter zoo:
+
+```bash
+OPENROUTER_API_KEY=... npm run zoo:live
+```
+
+The live zoo asks MiMo V2.5 Pro to choose among fake tool schemas and records whether it chose safe or risky tools. It is nondeterministic, manual, and not a CI gate. See [docs/agent-zoo-live.md](docs/agent-zoo-live.md).
+
 ### Agent Repo Lab Evidence
 
 The latest secondary agent-repo lab tested agentdiff against 25 public JS/TS agent repo seeds. It completed with 20 repos scanned, 5 repos skipped for archive/size guardrails, 0 crashes, 48 useful findings, 4 noisy findings, and 3/3 useful synthetic PR tests.

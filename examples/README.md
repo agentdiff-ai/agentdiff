@@ -18,6 +18,14 @@ Shows:
 - deterministic expected findings for risky behavior changes
 - no live models, API keys, dependency installs, or external repos
 
+Optional live model check:
+
+```bash
+OPENROUTER_API_KEY=... npm run zoo:live
+```
+
+The live check uses fake tool schemas only; no real tools execute.
+
 ## Support Ticket Behavior Demo
 
 Path: [support-ticket-agent](support-ticket-agent)

@@ -16,6 +16,8 @@ does agentdiff catch the behavior-risk changes we say it catches?
 
 It is not a benchmark, not a security audit, and not a claim about external repositories.
 
+For optional live model behavior validation, see [agent-zoo-live.md](agent-zoo-live.md).
+
 ## Run
 
 ```bash
@@ -59,6 +61,8 @@ The zoo:
 - does not install dependencies
 - does not touch external repos
 - does not execute fixture application code
+
+The separate `npm run zoo:live` command is intentionally excluded from this deterministic suite.
 
 ## Update Mode
 

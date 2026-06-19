@@ -4,6 +4,7 @@ node_modules/
 .agentdiff/stranger-tests/
 .agentdiff/agent-repo-lab/
 .agentdiff/agent-zoo/
+.agentdiff/agent-zoo-live/
 .DS_Store
 dist/
 examples/remotion-demo/dist/
