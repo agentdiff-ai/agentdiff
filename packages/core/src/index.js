@@ -45,6 +45,8 @@ const IGNORED_CALLS = new Set([
   "log"
 ]);
 
+const JS_TS_EXTENSIONS = [".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"];
+
 export function readJson(path) {
   return JSON.parse(fs.readFileSync(path, "utf8"));
 }
@@ -158,7 +160,7 @@ export function classifyChangedFile({ filePath, content = "" }) {
 }
 
 export function buildClassificationReport({ files, repo = process.cwd() }) {
-  const changedSurfaces = files.map((file) => classifyChangedFile(file));
+  const changedSurfaces = files.map((file) => applyMappedSurfaceMetadata(classifyChangedFile(file), file.agentMap));
   const diffAwareFindings = files.flatMap((file) => buildDiffAwareFindings(file));
   const mappedPaths = collectMappedSurfacePaths(files[0]?.agentMap);
   const mapDrift = changedSurfaces
@@ -203,9 +205,24 @@ export function extractCallsFromUnifiedDiff(diffText = "") {
   };
 }
 
-export function buildAgentMap({ files, repo = process.cwd() }) {
-  const surfaces = files
+export function buildAgentMap({ files, repo = process.cwd(), entrypointGlobs = [] }) {
+  const fileRecords = files.map((file) => ({
+    filePath: normalizePath(file.filePath),
+    content: file.content ?? ""
+  }));
+  const importGraph = buildImportGraph(fileRecords);
+  const initialSurfaces = fileRecords
     .map((file) => classifyChangedFile(file))
+    .map((surface) => applyConfiguredEntrypoint(surface, entrypointGlobs));
+  const entrypoints = resolveGraphEntrypoints({ surfaces: initialSurfaces, files: fileRecords, entrypointGlobs });
+  const reachability = computeReachability(importGraph.edges, entrypoints);
+  const importedBy = buildImportedBy(importGraph.edges);
+
+  importGraph.entrypoints = entrypoints;
+  importGraph.reachable_files = [...reachability.reachableFiles].sort();
+
+  const surfaces = initialSurfaces
+    .map((surface) => applyReachability(surface, { reachability, importedBy, entrypoints }))
     .filter((surface) => surface.label !== "not_agent_related");
 
   const agents = surfaces
@@ -223,6 +240,7 @@ export function buildAgentMap({ files, repo = process.cwd() }) {
       model_configs: relatedPaths(surfaces, "model_config"),
       retrievers: relatedPaths(surfaces, "retrieval"),
       memory: [],
+      reachable_from_entrypoint: surface.reachable_from_entrypoint,
       risk: [...new Set(surface.risk.length ? surface.risk : ["unknown"])],
       evidence: surface.evidence.map((item) => ({
         type: "classifier",
@@ -238,6 +256,7 @@ export function buildAgentMap({ files, repo = process.cwd() }) {
     repo,
     agents,
     surfaces,
+    import_graph: importGraph,
     evidence: surfaces.flatMap((surface) =>
       surface.evidence.map((item) => ({
         type: "classifier",
@@ -473,7 +492,7 @@ function summarizeCommands(prefix, commands) {
 
 function buildMapDriftFinding({ surface, mappedPaths }) {
   const isMapped = mappedPaths.has(normalizePath(surface.path));
-  const severity = surface.risk.includes("external_side_effect") ? "high" : "medium";
+  const severity = severityForSurface(surface);
 
   if (mappedPaths.size > 0 && !isMapped) {
     return [
@@ -484,6 +503,9 @@ function buildMapDriftFinding({ surface, mappedPaths }) {
         path: surface.path,
         label: surface.label,
         risk: surface.risk,
+        reachable_from_entrypoint: surface.reachable_from_entrypoint,
+        reachable_entrypoints: surface.reachable_entrypoints,
+        imported_by: surface.imported_by,
         evidence: surface.evidence,
         recommendation: recommendationForUnmappedSurface(surface)
       }
@@ -498,10 +520,37 @@ function buildMapDriftFinding({ surface, mappedPaths }) {
       path: surface.path,
       label: surface.label,
       risk: surface.risk,
+      reachable_from_entrypoint: surface.reachable_from_entrypoint,
+      reachable_entrypoints: surface.reachable_entrypoints,
+      imported_by: surface.imported_by,
       evidence: surface.evidence,
       recommendation: recommendationForSurface(surface)
     }
   ];
+}
+
+function applyMappedSurfaceMetadata(surface, agentMap) {
+  const mapped = (agentMap?.surfaces ?? []).find((candidate) => normalizePath(candidate.path) === normalizePath(surface.path));
+  if (!mapped) return surface;
+  const evidence = [...surface.evidence];
+  if (mapped.reachable_from_entrypoint) {
+    evidence.push(`reachable from entrypoint: ${(mapped.reachable_entrypoints ?? []).join(", ")}`);
+  }
+  return {
+    ...surface,
+    evidence: unique(evidence),
+    reachable_from_entrypoint: mapped.reachable_from_entrypoint ?? surface.reachable_from_entrypoint ?? false,
+    reachable_entrypoints: mapped.reachable_entrypoints ?? surface.reachable_entrypoints ?? [],
+    imported_by: mapped.imported_by ?? surface.imported_by ?? []
+  };
+}
+
+function severityForSurface(surface) {
+  if (!surface.reachable_from_entrypoint && isDocLikeSurface(surface)) return "low";
+  if (surface.reachable_from_entrypoint && surface.label === "tool_implementation" && surface.risk.includes("external_side_effect")) return "high";
+  if (surface.label === "tool_implementation" && surface.risk.includes("external_side_effect")) return "high";
+  if (surface.risk.includes("external_side_effect")) return surface.reachable_from_entrypoint ? "high" : "medium";
+  return "medium";
 }
 
 function titleForUnmappedSurface(surface) {
@@ -655,6 +704,230 @@ function normalizePath(filePath) {
   return filePath.replaceAll("\\", "/");
 }
 
+function isJsTsPath(filePath) {
+  return JS_TS_EXTENSIONS.includes(fileExtension(filePath));
+}
+
+function fileExtension(filePath) {
+  const normalized = normalizePath(filePath);
+  const name = normalized.split("/").pop() ?? normalized;
+  const index = name.lastIndexOf(".");
+  return index === -1 ? "" : name.slice(index).toLowerCase();
+}
+
+function applyConfiguredEntrypoint(surface, entrypointGlobs) {
+  if (!matchesEntrypointGlob(surface.path, entrypointGlobs)) return surface;
+  const evidence = [...surface.evidence, "configured agentdiff.yml entrypoint"];
+  return {
+    ...surface,
+    label: surface.label === "not_agent_related" ? "agent_entrypoint" : surface.label,
+    confidence: Math.max(surface.confidence, 0.84),
+    evidence: unique(evidence),
+    configured_entrypoint: true
+  };
+}
+
+function resolveGraphEntrypoints({ surfaces, files, entrypointGlobs }) {
+  const explicit = files
+    .filter((file) => isJsTsPath(file.filePath) && matchesEntrypointGlob(file.filePath, entrypointGlobs))
+    .map((file) => file.filePath);
+  if (explicit.length > 0) return unique(explicit).sort();
+
+  return surfaces
+    .filter((surface) => surface.label === "agent_entrypoint" && isJsTsPath(surface.path))
+    .map((surface) => surface.path)
+    .sort();
+}
+
+function matchesEntrypointGlob(filePath, globs) {
+  if (!globs || globs.length === 0) return false;
+  return globs.some((glob) => globToRegex(glob).test(normalizePath(filePath)));
+}
+
+function globToRegex(glob) {
+  const normalized = normalizePath(glob).replace(/^\.\//, "");
+  let pattern = "";
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index];
+    const next = normalized[index + 1];
+    if (char === "*" && next === "*") {
+      pattern += ".*";
+      index += 1;
+      continue;
+    }
+    if (char === "*") {
+      pattern += "[^/]*";
+      continue;
+    }
+    pattern += escapeRegex(char);
+  }
+  return new RegExp(`^${pattern}$`);
+}
+
+function escapeRegex(char) {
+  return /[\\^$+?.()|[\]{}]/.test(char) ? `\\${char}` : char;
+}
+
+function computeReachability(edges, entrypoints) {
+  const adjacency = new Map();
+  for (const edge of edges) {
+    if (!adjacency.has(edge.from)) adjacency.set(edge.from, []);
+    adjacency.get(edge.from).push(edge.to);
+  }
+
+  const reachableFiles = new Set();
+  const reachableEntryPoints = new Map();
+
+  for (const entrypoint of entrypoints) {
+    const queue = [entrypoint];
+    const seen = new Set();
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (seen.has(current)) continue;
+      seen.add(current);
+      reachableFiles.add(current);
+      if (!reachableEntryPoints.has(current)) reachableEntryPoints.set(current, new Set());
+      reachableEntryPoints.get(current).add(entrypoint);
+
+      for (const next of adjacency.get(current) ?? []) {
+        if (!seen.has(next)) queue.push(next);
+      }
+    }
+  }
+
+  return { reachableFiles, reachableEntryPoints };
+}
+
+function buildImportedBy(edges) {
+  const importedBy = new Map();
+  for (const edge of edges) {
+    if (!importedBy.has(edge.to)) importedBy.set(edge.to, []);
+    importedBy.get(edge.to).push({
+      path: edge.from,
+      import_statement: edge.import_statement
+    });
+  }
+  return importedBy;
+}
+
+function applyReachability(surface, { reachability, importedBy, entrypoints }) {
+  const normalized = normalizePath(surface.path);
+  const reachableFromEntrypoint = reachability.reachableFiles.has(normalized);
+  const reachableEntryPoints = [...(reachability.reachableEntryPoints.get(normalized) ?? [])].sort();
+  const directImporters = importedBy.get(normalized) ?? [];
+  const isConfiguredOrInferredEntrypoint = entrypoints.includes(normalized);
+  const evidence = [...surface.evidence];
+  let confidence = surface.confidence;
+  let recommendedCheckDepth = surface.recommended_check_depth;
+
+  if (isConfiguredOrInferredEntrypoint) {
+    evidence.push("entrypoint for import graph reachability");
+    confidence = Math.max(confidence, 0.86);
+  }
+
+  if (reachableFromEntrypoint && !isConfiguredOrInferredEntrypoint) {
+    evidence.push(`reachable from entrypoint: ${reachableEntryPoints.join(", ")}`);
+    confidence = Math.max(confidence, surface.risk.length > 0 ? 0.86 : 0.74);
+  }
+
+  if (!reachableFromEntrypoint && isDocLikeSurface(surface)) {
+    evidence.push("not reachable from configured or inferred JS/TS entrypoints");
+    confidence = Math.min(confidence, 0.4);
+    recommendedCheckDepth = "classify";
+  }
+
+  return {
+    ...surface,
+    confidence: Number(confidence.toFixed(2)),
+    evidence: unique(evidence),
+    recommended_check_depth: recommendedCheckDepth,
+    reachable_from_entrypoint: reachableFromEntrypoint,
+    reachable_entrypoints: reachableEntryPoints,
+    imported_by: directImporters
+  };
+}
+
+function isDocLikeSurface(surface) {
+  const normalized = normalizePath(surface.path).toLowerCase();
+  return (
+    normalized.endsWith(".md") ||
+    normalized.endsWith(".mdx") ||
+    normalized.endsWith(".txt") ||
+    normalized.includes("/docs/") ||
+    normalized.includes("/.claude/skills/") ||
+    normalized.includes("/skills/") ||
+    normalized.endsWith("skill.md")
+  );
+}
+
+function extractImportReferences(content = "") {
+  const refs = [];
+  const patterns = [
+    /\bimport\s+(?:[^'"]+\s+from\s+)?["']([^"']+)["']/g,
+    /\bexport\s+(?:[^'"]+\s+from\s+|\*\s+from\s+)["']([^"']+)["']/g,
+    /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g
+  ];
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      const statement = statementAt(content, match.index);
+      refs.push({
+        specifier: match[1],
+        statement
+      });
+    }
+  }
+
+  return refs.filter((ref) => ref.specifier.startsWith("."));
+}
+
+function statementAt(content, index) {
+  const start = content.lastIndexOf("\n", index) + 1;
+  const endOfLine = content.indexOf("\n", index);
+  const end = endOfLine === -1 ? content.length : endOfLine;
+  return content.slice(start, end).trim();
+}
+
+function resolveRelativeImport(fromPath, specifier, fileSet) {
+  if (!specifier.startsWith(".")) return null;
+  const fromDir = normalizePath(fromPath).split("/").slice(0, -1).join("/");
+  const raw = normalizePath(joinPath(fromDir, specifier));
+  const candidates = [];
+
+  candidates.push(raw);
+  for (const ext of JS_TS_EXTENSIONS) candidates.push(`${raw}${ext}`);
+  for (const ext of JS_TS_EXTENSIONS) candidates.push(`${raw}/index${ext}`);
+
+  return candidates.find((candidate) => fileSet.has(candidate)) ?? null;
+}
+
+function joinPath(base, relative) {
+  const parts = `${base}/${relative}`.split("/");
+  const output = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      output.pop();
+      continue;
+    }
+    output.push(part);
+  }
+  return output.join("/");
+}
+
+function dedupeEdges(edges) {
+  const seen = new Set();
+  const result = [];
+  for (const edge of edges) {
+    const key = `${edge.from}\0${edge.to}\0${edge.import_statement}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(edge);
+  }
+  return result.sort((left, right) => `${left.from}:${left.to}`.localeCompare(`${right.from}:${right.to}`));
+}
+
 function relatedPaths(surfaces, label) {
   return surfaces
     .filter((surface) => surface.label === label)
@@ -690,6 +963,36 @@ function summarizeTrace(trace) {
     tests_run: trace.tests_run ?? [],
     cost_usd: totalCost(trace),
     latency_ms: totalLatency(trace)
+  };
+}
+
+export function buildImportGraph(files) {
+  const normalizedFiles = files.map((file) => ({
+    filePath: normalizePath(file.filePath),
+    content: file.content ?? ""
+  }));
+  const jsFiles = normalizedFiles.filter((file) => isJsTsPath(file.filePath));
+  const fileSet = new Set(jsFiles.map((file) => file.filePath));
+  const edges = [];
+
+  for (const file of jsFiles) {
+    for (const importRef of extractImportReferences(file.content)) {
+      const resolved = resolveRelativeImport(file.filePath, importRef.specifier, fileSet);
+      if (!resolved) continue;
+      edges.push({
+        from: file.filePath,
+        to: resolved,
+        import_statement: importRef.statement,
+        evidence: [`relative import: ${importRef.specifier}`]
+      });
+    }
+  }
+
+  return {
+    nodes: jsFiles.map((file) => file.filePath).sort(),
+    edges: dedupeEdges(edges),
+    entrypoints: [],
+    reachable_files: []
   };
 }
 

@@ -125,7 +125,12 @@ function runRepoBakeoff() {
       filesConsidered: 0,
       filesSkipped: 0,
       bytesRead: 0,
-      scanLimitWarnings: []
+      scanLimitWarnings: [],
+      entrypointsFound: 0,
+      importEdges: 0,
+      reachableFiles: 0,
+      reachableHighRiskSurfaces: [],
+      unreachableHighRiskLookingSurfaces: []
     };
 
     repoResult.clone = runStep(`clone ${slug}`, "git", ["clone", "--depth=1", repoUrl, cloneDir], {
@@ -158,6 +163,9 @@ function runRepoBakeoff() {
     repoResult.filesSkipped = Number(map?.scan?.files_skipped ?? matchFirst(repoResult.scan.stdout, /files skipped:\s*(\d+)/) ?? 0);
     repoResult.bytesRead = Number(map?.scan?.bytes_read ?? matchFirst(repoResult.scan.stdout, /bytes read:\s*(\d+)/) ?? 0);
     repoResult.scanLimitWarnings = map?.scan?.scan_limit_warnings ?? [];
+    repoResult.entrypointsFound = Number(map?.scan?.entrypoints_found ?? map?.import_graph?.entrypoints?.length ?? 0);
+    repoResult.importEdges = Number(map?.scan?.import_edges ?? map?.import_graph?.edges?.length ?? 0);
+    repoResult.reachableFiles = Number(map?.scan?.reachable_files ?? map?.import_graph?.reachable_files?.length ?? 0);
     repoResult.agentSurfacesFound = surfaces.length;
     repoResult.highRiskSurfaces = surfaces
       .filter((surface) => surface.risk?.length > 0)
@@ -178,6 +186,14 @@ function runRepoBakeoff() {
         confidence: surface.confidence,
         evidence: surface.evidence?.slice(0, 2) ?? []
       }));
+    repoResult.reachableHighRiskSurfaces = surfaces
+      .filter((surface) => surface.reachable_from_entrypoint && surface.risk?.length > 0)
+      .slice(0, 12)
+      .map(surfaceSummary);
+    repoResult.unreachableHighRiskLookingSurfaces = surfaces
+      .filter((surface) => !surface.reachable_from_entrypoint && surface.risk?.length > 0)
+      .slice(0, 12)
+      .map(surfaceSummary);
 
     results.push(repoResult);
   }
@@ -322,6 +338,16 @@ function renderReport(report) {
   }
 
   if (report.bakeoff.length > 0) {
+    lines.push("## bakeoff table");
+    lines.push("");
+    lines.push("| repo | reachable high-risk surfaces | likely false positives | crash? | useful? |");
+    lines.push("| --- | ---: | ---: | --- | --- |");
+    for (const repo of report.bakeoff) {
+      const crash = repo.scan?.ok ? "no" : "yes";
+      const useful = repo.reachableHighRiskSurfaces.length > 0 ? "yes" : "unclear";
+      lines.push(`| ${repo.repo} | ${repo.reachableHighRiskSurfaces.length} | ${repo.falsePositiveCandidates.length} | ${crash} | ${useful} |`);
+    }
+    lines.push("");
     lines.push("## repo-bakeoff results");
     lines.push("");
     for (const repo of report.bakeoff) {
@@ -333,6 +359,9 @@ function renderReport(report) {
       lines.push(`files scanned: ${repo.filesScanned}`);
       lines.push(`files skipped: ${repo.filesSkipped}`);
       lines.push(`bytes read: ${repo.bytesRead}`);
+      lines.push(`entrypoints found: ${repo.entrypointsFound}`);
+      lines.push(`import edges: ${repo.importEdges}`);
+      lines.push(`reachable files: ${repo.reachableFiles}`);
       lines.push(`agent surfaces found: ${repo.agentSurfacesFound}`);
       lines.push(`unmapped surfaces: ${repo.unmappedSurfaces}`);
       if (repo.scanLimitWarnings.length > 0) {
@@ -346,6 +375,18 @@ function renderReport(report) {
       lines.push("high-risk surfaces:");
       if (repo.highRiskSurfaces.length === 0) lines.push("- none");
       for (const surface of repo.highRiskSurfaces) {
+        lines.push(`- ${surface.path}: ${surface.label} (${surface.risk.join(", ")})`);
+      }
+      lines.push("");
+      lines.push("reachable high-risk surfaces:");
+      if (repo.reachableHighRiskSurfaces.length === 0) lines.push("- none");
+      for (const surface of repo.reachableHighRiskSurfaces) {
+        lines.push(`- ${surface.path}: ${surface.label} (${surface.risk.join(", ")})`);
+      }
+      lines.push("");
+      lines.push("unreachable high-risk-looking surfaces:");
+      if (repo.unreachableHighRiskLookingSurfaces.length === 0) lines.push("- none");
+      for (const surface of repo.unreachableHighRiskLookingSurfaces) {
         lines.push(`- ${surface.path}: ${surface.label} (${surface.risk.join(", ")})`);
       }
       lines.push("");
@@ -431,6 +472,15 @@ function tail(text, maxLines = 24, maxChars = 5000) {
 
 function repoSlug(repoUrl) {
   return repoUrl.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "");
+}
+
+function surfaceSummary(surface) {
+  return {
+    path: surface.path,
+    label: surface.label,
+    risk: surface.risk ?? [],
+    confidence: surface.confidence
+  };
 }
 
 function timestampForPath() {

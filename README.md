@@ -256,6 +256,7 @@ Reports are written to `.agentdiff/stranger-tests/latest/report.md` and are igno
 - New unmapped agent surfaces when `.agentdiff/map.json` exists.
 - Recorded coding-agent traces where the agent edits tests instead of implementation.
 - Tool files under `/tools/`.
+- JS/TS relative import graph reachability from agent entrypoints.
 - State-mutating and external-side-effect risk using path, function name, argument, and diff heuristics.
 
 ## What It Does Not Do Yet
@@ -266,7 +267,7 @@ Reports are written to `.agentdiff/stranger-tests/latest/report.md` and are igno
 - No private repo ingestion.
 - No production trace ingestion.
 - No broad framework integration.
-- No full import graph yet.
+- No package import graph or tsconfig path alias resolution yet.
 - No live behavior harness execution in PRs yet.
 - No LLM judge or generic eval generation.
 
@@ -369,8 +370,8 @@ The behavior demo uses normalized traces so future harness integrations can adap
 
 ## Near-Term Roadmap
 
-1. Import graph scanning for JS/TS.
-2. Scenario schema.
-3. Harness contract.
-4. Base/head behavior runner.
-5. State fixture diff.
+1. Scenario schema.
+2. Harness contract.
+3. Base/head behavior runner.
+4. State fixture diff.
+5. Package import and tsconfig alias support.

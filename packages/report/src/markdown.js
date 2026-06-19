@@ -140,6 +140,9 @@ function renderClassificationReport(report) {
     lines.push(`type: ${finding.finding_type}`);
     lines.push(`label: ${finding.label}`);
     lines.push(`risk: ${finding.risk.length ? finding.risk.join(", ") : "none"}`);
+    if (typeof finding.reachable_from_entrypoint === "boolean") {
+      lines.push(`reachable from entrypoint: ${finding.reachable_from_entrypoint ? "yes" : "no"}`);
+    }
     lines.push("");
     lines.push("evidence:");
     for (const item of finding.evidence) {
@@ -153,7 +156,8 @@ function renderClassificationReport(report) {
   lines.push("## changed surfaces");
   lines.push("");
   for (const surface of report.changed_surfaces) {
-    lines.push(`- ${surface.path}: ${surface.label} (${surface.confidence})`);
+    const reachable = typeof surface.reachable_from_entrypoint === "boolean" ? `, reachable=${surface.reachable_from_entrypoint ? "yes" : "no"}` : "";
+    lines.push(`- ${surface.path}: ${surface.label} (${surface.confidence}${reachable})`);
   }
   lines.push("");
 

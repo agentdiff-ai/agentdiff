@@ -150,14 +150,21 @@ async function classify({ files, out }) {
 async function scan({ root, out }) {
   const rootDir = path.resolve(process.cwd(), root);
   const scanResult = collectScanFiles(rootDir);
+  const entrypointGlobs = readEntrypointGlobs(rootDir).map((glob) => resolveGlobRelativeToCwd(rootDir, glob));
   const map = buildAgentMap({
     repo: path.basename(process.cwd()),
+    entrypointGlobs,
     files: scanResult.files.map((file) => ({
       filePath: file.relativePath,
       content: readTextWithLimit(file.absolutePath, file.size)
     }))
   });
-  map.scan = scanResult.stats;
+  map.scan = {
+    ...scanResult.stats,
+    entrypoints_found: map.import_graph.entrypoints.length,
+    import_edges: map.import_graph.edges.length,
+    reachable_files: map.import_graph.reachable_files.length
+  };
 
   const outPath = path.resolve(process.cwd(), out);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
@@ -173,6 +180,9 @@ async function scan({ root, out }) {
       console.log(`- ${warning}`);
     }
   }
+  console.log(`entrypoints found: ${map.scan.entrypoints_found}`);
+  console.log(`import edges: ${map.scan.import_edges}`);
+  console.log(`reachable files: ${map.scan.reachable_files}`);
   console.log(`agent surfaces: ${map.surfaces.length}`);
   console.log(`agents: ${map.agents.length}`);
   console.log(`map: ${outPath}`);
@@ -520,6 +530,50 @@ function readTextIfPresent(filePath) {
 function readTextWithLimit(filePath, expectedSize) {
   if (expectedSize > readScanLimits().maxFileBytes) return "";
   return fs.readFileSync(filePath, "utf8");
+}
+
+function readEntrypointGlobs(rootDir) {
+  const configPath = ["agentdiff.yml", "agentdiff.yaml"]
+    .map((name) => path.join(rootDir, name))
+    .find((candidate) => fs.existsSync(candidate));
+  if (!configPath) return [];
+
+  const lines = fs.readFileSync(configPath, "utf8").split(/\r?\n/);
+  const entrypoints = [];
+  let inEntryPoints = false;
+  let entryIndent = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const indent = line.length - line.trimStart().length;
+
+    if (/^entrypoints:\s*$/.test(trimmed)) {
+      inEntryPoints = true;
+      entryIndent = indent;
+      continue;
+    }
+
+    if (inEntryPoints) {
+      if (indent <= entryIndent && !trimmed.startsWith("-")) {
+        inEntryPoints = false;
+        continue;
+      }
+      const match = trimmed.match(/^-\s+(.+)$/);
+      if (match) {
+        entrypoints.push(match[1].replace(/^["']|["']$/g, ""));
+      }
+    }
+  }
+
+  return entrypoints;
+}
+
+function resolveGlobRelativeToCwd(rootDir, glob) {
+  const normalized = glob.replaceAll("\\", "/").replace(/^\.\//, "");
+  if (path.isAbsolute(glob)) return path.relative(process.cwd(), glob).replaceAll("\\", "/");
+  const rootRelative = path.relative(process.cwd(), rootDir).replaceAll("\\", "/");
+  return rootRelative ? `${rootRelative}/${normalized}` : normalized;
 }
 
 function readScanLimits() {
