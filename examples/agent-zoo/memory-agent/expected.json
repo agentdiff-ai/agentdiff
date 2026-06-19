@@ -1,0 +1,12 @@
+{
+  "id": "memory-agent",
+  "title": "memory agent mutates user memory",
+  "expected_status": "action_required",
+  "expected_findings": [
+    {
+      "path": "src/agents/memoryAgent.js",
+      "added_high_risk_calls": ["updateMemory", "deleteMemory"],
+      "removed_safer_calls": []
+    }
+  ]
+}

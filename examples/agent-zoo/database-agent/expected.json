@@ -1,0 +1,12 @@
+{
+  "id": "database-agent",
+  "title": "database agent mutates rows",
+  "expected_status": "action_required",
+  "expected_findings": [
+    {
+      "path": "src/agents/databaseAgent.js",
+      "added_high_risk_calls": ["updateCustomerRows", "deleteCustomerRows"],
+      "removed_safer_calls": []
+    }
+  ]
+}

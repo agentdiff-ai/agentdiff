@@ -1,6 +1,22 @@
 # Examples
 
-Agentdiff currently has three demos. Together they show the product surface, map drift, and harness-backed trace comparison.
+Agentdiff currently has three live demos plus a deterministic agent zoo. Together they show the product surface, map drift, harness-backed trace comparison, and regression coverage for behavior-risk changes.
+
+## Agent Zoo
+
+Path: [agent-zoo](agent-zoo)
+
+Run:
+
+```bash
+npm run zoo
+```
+
+Shows:
+
+- safe/risky fixture repos for common agent failure modes
+- deterministic expected findings for risky behavior changes
+- no live models, API keys, dependency installs, or external repos
 
 ## Support Ticket Behavior Demo
 

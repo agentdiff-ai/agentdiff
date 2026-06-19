@@ -28,6 +28,8 @@
     "stranger:bakeoff": "node scripts/stranger-test.js --mode repo-bakeoff",
     "lab": "node scripts/agent-repo-lab.js",
     "lab:agent-repos": "node scripts/agent-repo-lab.js",
+    "zoo": "node scripts/agent-zoo-test.js",
+    "zoo:update": "node scripts/agent-zoo-test.js --update",
     "video": "npm --prefix examples/remotion-demo run video",
     "outreach:draft": "node scripts/outreach/draft.js docs/outreach-targets.example.json",
     "test": "node tests/diff-extraction.test.mjs && node tests/map-drift.test.mjs && node tests/coding-agent-trace.test.mjs && node tests/openrouter-harness.test.mjs && node tests/outreach-draft.test.mjs && node tests/scan-limits.test.mjs && node tests/import-graph.test.mjs && node tests/suppressions.test.mjs && node tests/init.test.mjs && node packages/cli/bin/agentdiff.js demo --out .agentdiff/runs/latest"

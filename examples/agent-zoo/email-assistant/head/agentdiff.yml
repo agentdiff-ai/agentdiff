@@ -1,0 +1,2 @@
+entrypoints:
+  - src/agents/emailAssistant.js

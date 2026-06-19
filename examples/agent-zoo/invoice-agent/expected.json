@@ -1,0 +1,12 @@
+{
+  "id": "invoice-agent",
+  "title": "invoice agent sends and charges",
+  "expected_status": "action_required",
+  "expected_findings": [
+    {
+      "path": "src/agents/invoiceAgent.js",
+      "added_high_risk_calls": ["sendInvoice", "chargeCard"],
+      "removed_safer_calls": ["draftInvoice"]
+    }
+  ]
+}

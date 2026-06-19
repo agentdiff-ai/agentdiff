@@ -1,0 +1,12 @@
+{
+  "id": "coding-agent",
+  "title": "coding agent updates tests instead of implementation",
+  "expected_status": "action_required",
+  "expected_findings": [
+    {
+      "path": "src/agents/codingAgent.js",
+      "added_high_risk_calls": ["updateTestSnapshot"],
+      "removed_safer_calls": []
+    }
+  ]
+}

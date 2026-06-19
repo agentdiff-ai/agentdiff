@@ -1,0 +1,5 @@
+{
+  "name": "zoo-database-agent",
+  "private": true,
+  "type": "module"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "zoo-invoice-agent",
+  "private": true,
+  "type": "module"
+}

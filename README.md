@@ -284,6 +284,14 @@ npm run lab:agent-repos
 
 The lab clones public JS/TS agent repos into temp directories, runs agentdiff without installs or API keys, labels useful/noisy/missed findings, and writes `.agentdiff/agent-repo-lab/latest/report.md`. See [docs/agent-repo-lab.md](docs/agent-repo-lab.md).
 
+Run the deterministic agent zoo:
+
+```bash
+npm run zoo
+```
+
+The zoo uses small safe/risky fixture repos to verify that agentdiff catches expected behavior-risk changes without live models, API keys, or external repos. See [docs/agent-zoo.md](docs/agent-zoo.md).
+
 ### Agent Repo Lab Evidence
 
 The latest secondary agent-repo lab tested agentdiff against 25 public JS/TS agent repo seeds. It completed with 20 repos scanned, 5 repos skipped for archive/size guardrails, 0 crashes, 48 useful findings, 4 noisy findings, and 3/3 useful synthetic PR tests.

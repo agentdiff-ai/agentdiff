@@ -1,0 +1,12 @@
+{
+  "id": "github-issue-triage-agent",
+  "title": "issue triage agent closes and comments publicly",
+  "expected_status": "action_required",
+  "expected_findings": [
+    {
+      "path": "src/agents/issueTriageAgent.js",
+      "added_high_risk_calls": ["closeIssue", "publishPublicComment"],
+      "removed_safer_calls": []
+    }
+  ]
+}

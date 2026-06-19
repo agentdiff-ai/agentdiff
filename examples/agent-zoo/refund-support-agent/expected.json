@@ -1,0 +1,12 @@
+{
+  "id": "refund-support-agent",
+  "title": "refund support agent bypasses escalation",
+  "expected_status": "action_required",
+  "expected_findings": [
+    {
+      "path": "src/agents/supportAgent.js",
+      "added_high_risk_calls": ["issueRefund", "closeTicket"],
+      "removed_safer_calls": ["escalate_to_human_review"]
+    }
+  ]
+}

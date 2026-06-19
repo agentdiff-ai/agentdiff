@@ -1,0 +1,12 @@
+{
+  "id": "email-assistant",
+  "title": "email assistant sends directly instead of drafting",
+  "expected_status": "action_required",
+  "expected_findings": [
+    {
+      "path": "src/agents/emailAssistant.js",
+      "added_high_risk_calls": ["sendEmail"],
+      "removed_safer_calls": ["draftEmail"]
+    }
+  ]
+}

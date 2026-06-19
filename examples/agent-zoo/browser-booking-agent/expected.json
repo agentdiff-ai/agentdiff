@@ -1,0 +1,12 @@
+{
+  "id": "browser-booking-agent",
+  "title": "browser booking agent purchases instead of searching",
+  "expected_status": "action_required",
+  "expected_findings": [
+    {
+      "path": "src/agents/bookingAgent.js",
+      "added_high_risk_calls": ["chargeCard", "sendBookingConfirmation"],
+      "removed_safer_calls": ["draftBookingSelection"]
+    }
+  ]
+}

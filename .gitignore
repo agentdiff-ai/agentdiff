@@ -3,6 +3,7 @@ node_modules/
 .agentdiff/outreach/
 .agentdiff/stranger-tests/
 .agentdiff/agent-repo-lab/
+.agentdiff/agent-zoo/
 .DS_Store
 dist/
 examples/remotion-demo/dist/
