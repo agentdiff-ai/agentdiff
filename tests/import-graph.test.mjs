@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { buildAgentMap, buildClassificationReport } from "../packages/core/src/index.js";
+import { buildAgentMap, buildClassificationReport, classifyChangedFile } from "../packages/core/src/index.js";
 
 const files = [
   {
@@ -434,5 +434,103 @@ try {
 } finally {
   fs.rmSync(malformedLangGraphRoot, { recursive: true, force: true });
 }
+
+const frameworkSurfaceMap = buildAgentMap({
+  repo: "framework-surfaces",
+  files: [
+    {
+      filePath: "langgraph.json",
+      content: JSON.stringify({ graphs: { agent: "./src/agent.ts:graph" } })
+    },
+    {
+      filePath: "product-hunt-agent/src/mastra/index.ts",
+      content: `
+import { Mastra } from "@mastra/core/mastra";
+export const mastra = new Mastra({ agents: {}, workflows: {} });
+`
+    },
+    {
+      filePath: "apps/chat/server/workflows/chat.ts",
+      content: `
+import type { Tool } from "ai";
+import type { ModelMessage, UIMessageChunk } from "ai";
+export function startWorkflow() {
+  return createDurableGithubAgent({ messages: [] as ModelMessage[], onChunk: (_chunk: UIMessageChunk) => {} });
+}
+export const workflowTools = {
+  sendMessage: tool({
+    parameters: z.object({ recipientEmail: z.string() }),
+    execute: async ({ recipientEmail }) => ({ recipientEmail })
+  })
+};
+`
+    },
+    {
+      filePath: "packages/github-tools/src/types.ts",
+      content: `
+import type { Tool } from "ai";
+export const githubTool = {
+  type: "function",
+  function: {
+    name: "createIssue",
+    parameters: { type: "object", properties: { title: { type: "string" } } }
+  }
+};
+`
+    },
+    {
+      filePath: "src/anthropicTool.ts",
+      content: `
+export const tool = {
+  name: "sendEmail",
+  input_schema: { type: "object", properties: { recipientEmail: { type: "string" } } }
+};
+`
+    }
+  ]
+});
+
+const langGraphConfigSurface = frameworkSurfaceMap.surfaces.find((surface) => surface.path === "langgraph.json");
+assert.ok(langGraphConfigSurface);
+assert.equal(langGraphConfigSurface.surface_category, "framework_config");
+assert.ok(langGraphConfigSurface.evidence.some((item) => item.includes("langgraph.json")));
+
+const mastraSurface = frameworkSurfaceMap.surfaces.find((surface) => surface.path === "product-hunt-agent/src/mastra/index.ts");
+assert.ok(mastraSurface);
+assert.equal(mastraSurface.surface_category, "framework_config");
+assert.ok(mastraSurface.evidence.some((item) => item.includes("Mastra runtime path")));
+
+const aiSdkSurface = frameworkSurfaceMap.surfaces.find((surface) => surface.path === "apps/chat/server/workflows/chat.ts");
+assert.ok(aiSdkSurface);
+assert.equal(aiSdkSurface.surface_category, "ai_sdk_tool");
+assert.ok(aiSdkSurface.evidence.some((item) => item.includes("tool(...)")));
+assert.ok(aiSdkSurface.evidence.some((item) => item.includes("parameters:")));
+assert.ok(aiSdkSurface.evidence.some((item) => item.includes("execute:")));
+assert.ok(aiSdkSurface.evidence.some((item) => item.includes("agent factory")));
+
+const openAiSchemaSurface = frameworkSurfaceMap.surfaces.find((surface) => surface.path === "packages/github-tools/src/types.ts");
+assert.ok(openAiSchemaSurface);
+assert.equal(openAiSchemaSurface.surface_category, "tool_schema");
+assert.ok(openAiSchemaSurface.evidence.some((item) => item.includes("Tool from ai")));
+assert.ok(openAiSchemaSurface.evidence.some((item) => item.includes('type: "function"')));
+assert.ok(openAiSchemaSurface.evidence.some((item) => item.includes("function { name, parameters }")));
+
+const anthropicSchemaSurface = frameworkSurfaceMap.surfaces.find((surface) => surface.path === "src/anthropicTool.ts");
+assert.ok(anthropicSchemaSurface);
+assert.equal(anthropicSchemaSurface.surface_category, "tool_schema");
+assert.ok(anthropicSchemaSurface.evidence.some((item) => item.includes("input_schema")));
+
+const docsAiSdkSurface = classifyChangedFile({
+  filePath: "docs/tools.md",
+  content: `
+Example only:
+tool({
+  parameters: {},
+  execute: async () => {}
+});
+`
+});
+assert.equal(docsAiSdkSurface.surface_category, "docs_example");
+assert.ok(docsAiSdkSurface.confidence <= 0.8);
 
 console.log("import graph tests passed");

@@ -338,7 +338,12 @@ function missedSignalReasons(relative, content) {
   const lowerPath = relative.toLowerCase();
   if (relative.endsWith("langgraph.json")) reasons.push("LangGraph config file");
   if (/mastra\.(config|conf)\.(ts|js|mjs|cjs)$/i.test(relative) || lowerPath.includes("/mastra/")) reasons.push("Mastra config or runtime path");
-  if (/\btool\s*\(|defineTool|createTool|DynamicStructuredTool|toolSchema|tools\s*:/i.test(content)) reasons.push("AI tool definition syntax");
+  if (/\btool\s*\(|\bdefineTool\s*\(|\bcreateTool\s*\(|DynamicStructuredTool|toolSchema|\btools\s*:|\bparameters\s*:|\bexecute\s*:/i.test(content)) {
+    reasons.push("AI tool definition syntax");
+  }
+  if (/type\s*:\s*["']function["']/i.test(content) || /function\s*:\s*\{[\s\S]{0,600}\bparameters\s*:/i.test(content) || /\binput_schema\s*:/i.test(content)) {
+    reasons.push("tool schema syntax");
+  }
   if (/from\s+["'](?:openai|@openai\/agents|@anthropic-ai\/sdk|ai|@ai-sdk\/[^"']+)["']/i.test(content)) reasons.push("AI SDK import");
   if (/\b(send|refund|charge|delete|close|publish|update|create|approve|reject|revoke|grant|checkpoint|memory)\w*\s*\(/i.test(content)) {
     reasons.push("state-changing or tool-like operation name");

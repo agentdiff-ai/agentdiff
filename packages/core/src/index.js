@@ -56,6 +56,9 @@ export function classifyChangedFile({ filePath, content = "" }) {
   const basename = normalized.split("/").pop() ?? normalized;
   const lowerContent = content.toLowerCase();
   const exportedFunctions = extractExportedFunctionNames(content);
+  const frameworkConfigSignal = frameworkConfigSignalFor({ normalized, basename, lowerContent });
+  const aiSdkToolSignals = aiSdkToolSignalsFor(content);
+  const toolSchemaSignals = toolSchemaSignalsFor(content);
   const evidence = [];
   const risk = [];
   let label = "not_agent_related";
@@ -95,6 +98,24 @@ export function classifyChangedFile({ filePath, content = "" }) {
     evidence.push("path suggests schema or tool definition");
   }
 
+  if (frameworkConfigSignal) {
+    label = label === "not_agent_related" ? "agent_entrypoint" : label;
+    confidence = Math.max(confidence, frameworkConfigSignal.confidence);
+    evidence.push(frameworkConfigSignal.evidence);
+  }
+
+  if (aiSdkToolSignals.length > 0) {
+    label = label === "not_agent_related" ? "tool_definition" : label;
+    confidence = Math.max(confidence, 0.8);
+    evidence.push(...aiSdkToolSignals);
+  }
+
+  if (toolSchemaSignals.length > 0) {
+    label = label === "not_agent_related" ? "tool_definition" : label;
+    confidence = Math.max(confidence, 0.8);
+    evidence.push(...toolSchemaSignals);
+  }
+
   if (matchesAny(basename, ["model", "provider", "router", "llm"])) {
     label = label === "not_agent_related" ? "model_config" : label;
     confidence = Math.max(confidence, 0.65);
@@ -108,7 +129,7 @@ export function classifyChangedFile({ filePath, content = "" }) {
   }
 
   if (/\b(openai|anthropic|chat\.completions|responses\.create|generateobject|streamtext)\b/.test(lowerContent)) {
-    label = label === "not_agent_related" ? "agent_entrypoint" : label;
+    label = label === "not_agent_related" || (label === "tool_definition" && aiSdkToolSignals.length > 0) ? "agent_entrypoint" : label;
     confidence = Math.max(confidence, 0.82);
     evidence.push("content contains model-call pattern");
   }
@@ -153,7 +174,7 @@ export function classifyChangedFile({ filePath, content = "" }) {
   return {
     path: filePath,
     label,
-    surface_category: surfaceCategoryFor({ filePath, label, content }),
+    surface_category: surfaceCategoryFor({ filePath, label, content, frameworkConfigSignal, aiSdkToolSignals, toolSchemaSignals }),
     confidence: Number(confidence.toFixed(2)),
     risk: [...new Set(risk)],
     evidence: [...new Set(evidence)],
@@ -852,13 +873,69 @@ function hasStrongMutationContext(context) {
   );
 }
 
-function surfaceCategoryFor({ filePath, label, content = "" }) {
+function frameworkConfigSignalFor({ normalized, basename, lowerContent }) {
+  if (basename === "langgraph.json") {
+    return {
+      category: "framework_config",
+      confidence: 0.84,
+      evidence: "framework config detected: langgraph.json"
+    };
+  }
+
+  if (
+    normalized.includes("/src/mastra/index.") ||
+    normalized.includes("/src/mastra/agents/") ||
+    normalized.includes("/src/mastra/tools/") ||
+    normalized.includes("/src/mastra/workflows/")
+  ) {
+    return {
+      category: "framework_config",
+      confidence: lowerContent.includes("@mastra/") || lowerContent.includes("new mastra") ? 0.84 : 0.74,
+      evidence: "Mastra runtime path detected under src/mastra"
+    };
+  }
+
+  return null;
+}
+
+function aiSdkToolSignalsFor(content = "") {
+  const signals = [];
+  const patterns = [
+    [/\btool\s*\(/, "AI SDK tool syntax: tool(...)"],
+    [/\bcreateTool\s*\(/, "AI SDK tool syntax: createTool(...)"],
+    [/\bdefineTool\s*\(/, "AI SDK tool syntax: defineTool(...)"],
+    [/\btools\s*:/, "AI SDK tool syntax: tools:"],
+    [/\bparameters\s*:/, "AI SDK tool syntax: parameters:"],
+    [/\bexecute\s*:/, "AI SDK tool syntax: execute:"],
+    [/import\s+type\s+\{[^}]*\bTool\b[^}]*\}\s+from\s+["']ai["']/i, "AI SDK tool type import: Tool from ai"],
+    [/from\s+["']ai["'][\s\S]{0,1200}\bcreate\w*Agent\b/i, "AI SDK import with agent factory syntax"]
+  ];
+  for (const [regex, evidence] of patterns) {
+    if (regex.test(content)) signals.push(evidence);
+  }
+  return unique(signals);
+}
+
+function toolSchemaSignalsFor(content = "") {
+  const signals = [];
+  if (/type\s*:\s*["']function["']/i.test(content)) signals.push('OpenAI tool schema syntax: type: "function"');
+  if (/function\s*:\s*\{[\s\S]{0,400}\bname\s*:/i.test(content) && /function\s*:\s*\{[\s\S]{0,600}\bparameters\s*:/i.test(content)) {
+    signals.push("OpenAI tool schema syntax: function { name, parameters }");
+  }
+  if (/\binput_schema\s*:/i.test(content)) signals.push("Anthropic tool schema syntax: input_schema");
+  return unique(signals);
+}
+
+function surfaceCategoryFor({ filePath, label, content = "", frameworkConfigSignal = null, aiSdkToolSignals = [], toolSchemaSignals = [] }) {
   const normalized = normalizePath(filePath).toLowerCase();
   const basename = normalized.split("/").pop() ?? normalized;
   const lowerContent = content.toLowerCase();
 
   if (isDocPath(normalized)) return "docs_example";
   if (isTestPath(normalized) || normalized.includes("/__tests__/") || normalized.includes("/fixtures/") || normalized.includes("/fixture/")) return "test_fixture";
+  if (frameworkConfigSignal) return "framework_config";
+  if (toolSchemaSignals.length > 0) return "tool_schema";
+  if (aiSdkToolSignals.length > 0) return "ai_sdk_tool";
   if (isConfigPath(normalized)) return "config_metadata";
   if ((normalized.includes("browser") || lowerContent.includes("browser")) && (normalized.includes("/tools/") || label === "tool_implementation")) return "browser_tool";
   if (matchesAny(normalized, ["checkpoint", "memory", "postgres", "store", "persistence"])) return "persistence";
