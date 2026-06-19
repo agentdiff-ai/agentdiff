@@ -2,6 +2,7 @@ node_modules/
 .agentdiff/runs/
 .agentdiff/outreach/
 .agentdiff/stranger-tests/
+.agentdiff/agent-repo-lab/
 .DS_Store
 dist/
 examples/remotion-demo/dist/

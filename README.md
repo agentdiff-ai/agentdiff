@@ -276,6 +276,14 @@ Reports are written to `.agentdiff/stranger-tests/latest/report.md` and are igno
 
 Read the public repo bakeoff summary: [docs/bakeoff.md](docs/bakeoff.md).
 
+Run the fixed-seed agent repo lab:
+
+```bash
+npm run lab:agent-repos
+```
+
+The lab clones public JS/TS agent repos into temp directories, runs agentdiff without installs or API keys, labels useful/noisy/missed findings, and writes `.agentdiff/agent-repo-lab/latest/report.md`. See [docs/agent-repo-lab.md](docs/agent-repo-lab.md).
+
 ## What Agentdiff Catches Today
 
 - Changed agent files in pull requests.
