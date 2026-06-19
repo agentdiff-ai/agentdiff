@@ -16,6 +16,8 @@ The generated report is written to:
 .agentdiff/stranger-tests/latest/report.md
 ```
 
+For a qualitative read of representative findings, see [bakeoff-findings.md](bakeoff-findings.md).
+
 ## Latest Results
 
 Latest run: June 19, 2026 on Windows, Node `v22.11.0`.
