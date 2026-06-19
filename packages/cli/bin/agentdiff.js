@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { analyzeTracePair, buildClassificationReport, readJson } from "../../core/src/index.js";
+import { analyzeTracePair, buildAgentMap, buildClassificationReport, readJson } from "../../core/src/index.js";
 import { renderMarkdownReport } from "../../report/src/markdown.js";
 
 main(process.argv.slice(2)).catch((error) => {
@@ -37,6 +37,13 @@ async function main(argv) {
     const out = readOption(argv, "--out") ?? ".agentdiff/runs/latest";
     const files = await resolveChangedFiles(argv);
     await classify({ files, out });
+    return;
+  }
+
+  if (command === "scan") {
+    const out = readOption(argv, "--out") ?? ".agentdiff/map.json";
+    const root = readOption(argv, "--root") ?? ".";
+    await scan({ root, out });
     return;
   }
 
@@ -103,6 +110,56 @@ async function classify({ files, out }) {
   console.log(`changed surfaces: ${report.changed_surfaces.length}`);
   console.log(`map drift findings: ${report.map_drift.length}`);
   console.log(`report: ${path.join(outDir, "report.md")}`);
+}
+
+async function scan({ root, out }) {
+  const rootDir = path.resolve(process.cwd(), root);
+  const filePaths = listScanFiles(rootDir).map((absolutePath) => path.relative(process.cwd(), absolutePath).replaceAll("\\", "/"));
+  const map = buildAgentMap({
+    repo: path.basename(process.cwd()),
+    files: filePaths.map((filePath) => ({
+      filePath,
+      content: readTextIfPresent(path.resolve(process.cwd(), filePath))
+    }))
+  });
+
+  const outPath = path.resolve(process.cwd(), out);
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, `${JSON.stringify(map, null, 2)}\n`);
+
+  console.log(`scanned files: ${filePaths.length}`);
+  console.log(`agent surfaces: ${map.surfaces.length}`);
+  console.log(`agents: ${map.agents.length}`);
+  console.log(`map: ${outPath}`);
+}
+
+function listScanFiles(rootDir) {
+  const ignoredDirs = new Set([".git", "node_modules", "dist", "coverage"]);
+  const allowedExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json", ".md", ".mdx", ".txt", ".yml", ".yaml"]);
+  const results = [];
+
+  function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (ignoredDirs.has(entry.name)) continue;
+        if (entry.name === ".agentdiff") continue;
+        if (entry.name === "traces") continue;
+        if (entry.name === "runs" && dir.endsWith(".agentdiff")) continue;
+        walk(path.join(dir, entry.name));
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+      const absolutePath = path.join(dir, entry.name);
+      const ext = path.extname(entry.name).toLowerCase();
+      if (!allowedExtensions.has(ext)) continue;
+      if (fs.statSync(absolutePath).size > 200_000) continue;
+      results.push(absolutePath);
+    }
+  }
+
+  walk(rootDir);
+  return results.sort();
 }
 
 async function resolveChangedFiles(argv) {
@@ -204,6 +261,9 @@ Commands:
 
   agentdiff classify --base <ref> --head <ref> [--out <dir>]
     Classify files changed between two git refs.
+
+  agentdiff scan [--root <dir>] [--out <map.json>]
+    Scan the repo and write a starter .agentdiff/map.json.
 
   agentdiff demo
     Run the support-ticket regression demo.

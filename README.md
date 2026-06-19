@@ -39,6 +39,12 @@ Classify changed files without running an agent harness:
 node packages/cli/bin/agentdiff.js classify --files examples/support-ticket-agent/head/src/supportAgent.js
 ```
 
+Generate a starter agent map:
+
+```bash
+node packages/cli/bin/agentdiff.js scan --root examples/support-ticket-agent/head --out .agentdiff/map.json
+```
+
 Compare two normalized traces:
 
 ```bash

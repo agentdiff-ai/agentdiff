@@ -14,6 +14,7 @@ export function readJson(path) {
 
 export function classifyChangedFile({ filePath, content = "" }) {
   const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+  const basename = normalized.split("/").pop() ?? normalized;
   const lowerContent = content.toLowerCase();
   const evidence = [];
   const risk = [];
@@ -21,37 +22,37 @@ export function classifyChangedFile({ filePath, content = "" }) {
   let confidence = 0.15;
   let recommendedCheckDepth = "classify";
 
-  if (matchesAny(normalized, ["agent", "assistant", "workflow", "orchestrator"])) {
+  if (matchesAny(basename, ["agent", "assistant", "workflow", "orchestrator"]) || /export\s+async\s+function\s+run.*agent/i.test(content)) {
     label = "agent_entrypoint";
     confidence = Math.max(confidence, 0.72);
     evidence.push("path suggests agent entrypoint or orchestration code");
   }
 
-  if (matchesAny(normalized, ["prompt", "system-message", "instructions"])) {
+  if (matchesAny(basename, ["prompt", "system-message", "instructions"])) {
     label = "prompt";
     confidence = Math.max(confidence, 0.78);
     evidence.push("path suggests prompt or instruction surface");
   }
 
-  if (matchesAny(normalized, ["tool", "tools", "function", "action"])) {
+  if (matchesAny(normalized, ["/tools/", "/tool/"]) || matchesAny(basename, ["tool", "function", "action"])) {
     label = "tool_implementation";
     confidence = Math.max(confidence, 0.76);
     evidence.push("path suggests tool implementation");
   }
 
-  if (matchesAny(normalized, ["schema", "zod", "jsonschema"])) {
+  if (matchesAny(basename, ["schema", "zod", "jsonschema"])) {
     label = label === "not_agent_related" ? "tool_definition" : label;
     confidence = Math.max(confidence, 0.62);
     evidence.push("path suggests schema or tool definition");
   }
 
-  if (matchesAny(normalized, ["model", "provider", "router", "llm"])) {
+  if (matchesAny(basename, ["model", "provider", "router", "llm"])) {
     label = label === "not_agent_related" ? "model_config" : label;
     confidence = Math.max(confidence, 0.65);
     evidence.push("path suggests model/provider configuration");
   }
 
-  if (matchesAny(normalized, ["retriev", "vector", "embedding", "memory"])) {
+  if (matchesAny(basename, ["retriev", "vector", "embedding", "memory"])) {
     label = label === "not_agent_related" ? "retrieval" : label;
     confidence = Math.max(confidence, 0.62);
     evidence.push("path suggests retrieval or memory surface");
@@ -126,6 +127,53 @@ export function buildClassificationReport({ files, repo = process.cwd() }) {
       estimated_cost_usd: 0,
       actual_cost_usd: 0
     }
+  };
+}
+
+export function buildAgentMap({ files, repo = process.cwd() }) {
+  const surfaces = files
+    .map((file) => classifyChangedFile(file))
+    .filter((surface) => surface.label !== "not_agent_related");
+
+  const agents = surfaces
+    .filter((surface) => surface.label === "agent_entrypoint")
+    .map((surface) => ({
+      id: idFromPath(surface.path),
+      display_name: displayNameFromPath(surface.path),
+      entrypoints: [surface.path],
+      prompts: relatedPaths(surfaces, "prompt"),
+      tools: relatedPaths(surfaces, "tool_implementation"),
+      schemas: relatedPaths(surfaces, "tool_definition"),
+      state: surfaces
+        .filter((candidate) => candidate.risk.includes("state_mutation"))
+        .map((candidate) => ({ path: candidate.path, risk: candidate.risk })),
+      model_configs: relatedPaths(surfaces, "model_config"),
+      retrievers: relatedPaths(surfaces, "retrieval"),
+      memory: [],
+      risk: [...new Set(surface.risk.length ? surface.risk : ["unknown"])],
+      evidence: surface.evidence.map((item) => ({
+        type: "classifier",
+        path: surface.path,
+        detail: item,
+        confidence: surface.confidence
+      }))
+    }));
+
+  return {
+    version: "0.1",
+    generated_at: new Date().toISOString(),
+    repo,
+    agents,
+    surfaces,
+    evidence: surfaces.flatMap((surface) =>
+      surface.evidence.map((item) => ({
+        type: "classifier",
+        path: surface.path,
+        label: surface.label,
+        detail: item,
+        confidence: surface.confidence
+      }))
+    )
   };
 }
 
@@ -276,6 +324,25 @@ function recommendationForSurface(surface) {
   }
 
   return "Review whether this surface belongs in .agentdiff/map.json.";
+}
+
+function relatedPaths(surfaces, label) {
+  return surfaces
+    .filter((surface) => surface.label === label)
+    .map((surface) => ({ path: surface.path, risk: surface.risk, confidence: surface.confidence }));
+}
+
+function idFromPath(filePath) {
+  const name = filePath
+    .replaceAll("\\", "/")
+    .split("/")
+    .pop()
+    .replace(/\.[^.]+$/, "");
+  return name.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase() || "agent";
+}
+
+function displayNameFromPath(filePath) {
+  return idFromPath(filePath).replaceAll("_", " ");
 }
 
 function matchesAny(value, needles) {
