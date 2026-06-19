@@ -61,17 +61,59 @@ function renderClassificationReport(report) {
   lines.push(`status: ${report.status}`);
   lines.push(`run mode: ${report.mode}`);
   lines.push(`changed surfaces: ${report.changed_surfaces.length}`);
+  lines.push(`diff-aware findings: ${report.diff_aware_findings.length}`);
   lines.push(`map drift findings: ${report.map_drift.length}`);
   lines.push(`estimated cost: $${report.cost.estimated_cost_usd.toFixed(4)}`);
   lines.push(`actual cost: $${report.cost.actual_cost_usd.toFixed(4)}`);
   lines.push("");
 
-  if (report.map_drift.length === 0) {
+  if (report.diff_aware_findings.length === 0 && report.map_drift.length === 0) {
     lines.push("## top findings");
     lines.push("");
     lines.push("No agent-related changed surfaces detected.");
     lines.push("");
     return lines.join("\n");
+  }
+
+  if (report.diff_aware_findings.length > 0) {
+    lines.push("## diff-aware findings");
+    lines.push("");
+
+    report.diff_aware_findings.forEach((finding, index) => {
+      lines.push(`### ${index + 1}. ${finding.title}`);
+      lines.push("");
+      lines.push(`file: ${finding.path}`);
+      lines.push(`severity: ${finding.severity}`);
+      lines.push(`type: ${finding.finding_type}`);
+      lines.push("");
+      lines.push("added calls:");
+      for (const call of finding.added_calls) {
+        const suffix = finding.added_high_risk_calls.includes(call) ? " (high-risk)" : "";
+        lines.push(`- ${call}${suffix}`);
+      }
+      if (finding.added_calls.length === 0) {
+        lines.push("- none");
+      }
+      lines.push("");
+      lines.push("removed calls:");
+      for (const call of finding.removed_calls) {
+        const suffix = finding.removed_safer_calls.includes(call) ? " (safer/guardrail)" : "";
+        lines.push(`- ${call}${suffix}`);
+      }
+      if (finding.removed_calls.length === 0) {
+        lines.push("- none");
+      }
+      lines.push("");
+      lines.push(`why it matters: ${finding.reason}`);
+      lines.push("");
+      lines.push("evidence:");
+      for (const item of finding.evidence) {
+        lines.push(`- ${item}`);
+      }
+      lines.push("");
+      lines.push(`recommendation: ${finding.recommendation}`);
+      lines.push("");
+    });
   }
 
   lines.push("## top findings");
