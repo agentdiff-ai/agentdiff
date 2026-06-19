@@ -147,7 +147,7 @@ The live harness runs in a temporary fixture, asks the model for a validated JSO
 
 `agentdiff init --github-action` creates this workflow at `.github/workflows/agentdiff.yml`. You can also add it manually:
 
-Current prototype installs use `agentdiff-ai/agentdiff@main`. Once the first stable tag exists, pin the workflow to `agentdiff-ai/agentdiff@v0`. See [docs/release.md](docs/release.md) for the release checklist.
+Use the first public prototype tag, `agentdiff-ai/agentdiff@v0.1.0`. `@main` follows the latest repository state and is only for testing unreleased changes. See [docs/release.md](docs/release.md) for the release checklist.
 
 ```yaml
 name: agentdiff
@@ -168,8 +168,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Prototype install: @main. Stable install after first tag: agentdiff-ai/agentdiff@v0.
-      - uses: agentdiff-ai/agentdiff@main
+      # Public prototype install. Use @main only to test unreleased changes.
+      - uses: agentdiff-ai/agentdiff@v0.1.0
         with:
           command: classify
           base: origin/${{ github.base_ref }}
@@ -186,8 +186,8 @@ jobs:
 Recorded harness workflow:
 
 ```yaml
-# Prototype install: @main. Stable install after first tag: agentdiff-ai/agentdiff@v0.
-- uses: agentdiff-ai/agentdiff@main
+# Public prototype install. Use @main only to test unreleased changes.
+- uses: agentdiff-ai/agentdiff@v0.1.0
   with:
     command: run
     example: coding-agent-harness

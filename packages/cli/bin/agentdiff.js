@@ -1156,11 +1156,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # Prototype install: @main follows the latest repository state.
-      # Stable install after the first tagged release: agentdiff-ai/agentdiff@v0.
+      # Public prototype install. Use @main only to test unreleased changes.
       # For local development inside this repo, the equivalent command is:
       # node packages/cli/bin/agentdiff.js classify --base origin/\${{ github.base_ref }} --head HEAD
-      - uses: agentdiff-ai/agentdiff@main
+      - uses: agentdiff-ai/agentdiff@v0.1.0
         with:
           command: classify
           base: origin/\${{ github.base_ref }}

@@ -1,22 +1,24 @@
 # Release Checklist
 
-Agentdiff is currently an early prototype. Prototype installs use:
+Agentdiff is currently an early prototype. Public prototype installs should pin to the first tag:
 
 ```yaml
-uses: agentdiff-ai/agentdiff@main
+uses: agentdiff-ai/agentdiff@v0.1.0
 ```
 
-Stable installs should use a release tag once available:
+`@main` follows the latest repository state and should only be used to test unreleased changes.
+
+A future moving major tag may be introduced later:
 
 ```yaml
 uses: agentdiff-ai/agentdiff@v0
 ```
 
-Do not publish to npm or create a git tag until the release owner explicitly decides to cut the release.
+Do not publish to npm or create additional git tags until the release owner explicitly decides to cut the next release.
 
-## First Tag: `v0.1.0`
+## Release Checklist
 
-Before tagging:
+Before tagging a new release:
 
 1. Run `npm test`.
 2. Run `npm run stranger`.
