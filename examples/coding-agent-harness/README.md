@@ -39,3 +39,7 @@ OPENROUTER_API_KEY=... node examples/coding-agent-harness/harnesses/openrouter-o
 ```
 
 The product abstraction is the normalized trace, not a specific agent runtime.
+
+## Demo PR Trigger
+
+This line exists so the recorded harness workflow can run in a live pull request.
