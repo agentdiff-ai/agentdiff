@@ -129,6 +129,9 @@ function runRepoBakeoff() {
       entrypointsFound: 0,
       importEdges: 0,
       reachableFiles: 0,
+      aliasImportsResolved: 0,
+      workspaceImportsResolved: 0,
+      unresolvedNonRelativeImports: 0,
       reachableHighRiskSurfaces: [],
       unreachableHighRiskLookingSurfaces: []
     };
@@ -166,6 +169,11 @@ function runRepoBakeoff() {
     repoResult.entrypointsFound = Number(map?.scan?.entrypoints_found ?? map?.import_graph?.entrypoints?.length ?? 0);
     repoResult.importEdges = Number(map?.scan?.import_edges ?? map?.import_graph?.edges?.length ?? 0);
     repoResult.reachableFiles = Number(map?.scan?.reachable_files ?? map?.import_graph?.reachable_files?.length ?? 0);
+    repoResult.aliasImportsResolved = Number(map?.scan?.alias_imports_resolved ?? map?.import_graph?.alias_imports_resolved ?? 0);
+    repoResult.workspaceImportsResolved = Number(map?.scan?.workspace_imports_resolved ?? map?.import_graph?.workspace_imports_resolved ?? 0);
+    repoResult.unresolvedNonRelativeImports = Number(
+      map?.scan?.unresolved_non_relative_imports ?? map?.import_graph?.unresolved_non_relative_imports ?? 0
+    );
     repoResult.agentSurfacesFound = surfaces.length;
     repoResult.highRiskSurfaces = surfaces
       .filter((surface) => surface.risk?.length > 0)
@@ -362,6 +370,9 @@ function renderReport(report) {
       lines.push(`entrypoints found: ${repo.entrypointsFound}`);
       lines.push(`import edges: ${repo.importEdges}`);
       lines.push(`reachable files: ${repo.reachableFiles}`);
+      lines.push(`alias imports resolved: ${repo.aliasImportsResolved}`);
+      lines.push(`workspace imports resolved: ${repo.workspaceImportsResolved}`);
+      lines.push(`unresolved non-relative imports: ${repo.unresolvedNonRelativeImports}`);
       lines.push(`agent surfaces found: ${repo.agentSurfacesFound}`);
       lines.push(`unmapped surfaces: ${repo.unmappedSurfaces}`);
       if (repo.scanLimitWarnings.length > 0) {

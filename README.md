@@ -258,7 +258,7 @@ Read the public repo bakeoff summary: [docs/bakeoff.md](docs/bakeoff.md).
 - New unmapped agent surfaces when `.agentdiff/map.json` exists.
 - Recorded coding-agent traces where the agent edits tests instead of implementation.
 - Tool files under `/tools/`.
-- JS/TS relative import graph reachability from agent entrypoints.
+- JS/TS import graph reachability from agent entrypoints, including relative imports, `tsconfig`/`jsconfig` path aliases, and workspace package imports.
 - State-mutating and external-side-effect risk using path, function name, argument, and diff heuristics.
 
 ## What It Does Not Do Yet
@@ -269,7 +269,7 @@ Read the public repo bakeoff summary: [docs/bakeoff.md](docs/bakeoff.md).
 - No private repo ingestion.
 - No production trace ingestion.
 - No broad framework integration.
-- No package import graph or tsconfig path alias resolution yet.
+- No full TypeScript compiler resolution; `tsconfig` aliases and workspace imports are best-effort.
 - No live behavior harness execution in PRs yet.
 - No LLM judge or generic eval generation.
 
@@ -376,4 +376,4 @@ The behavior demo uses normalized traces so future harness integrations can adap
 2. Harness contract.
 3. Base/head behavior runner.
 4. State fixture diff.
-5. Package import and tsconfig alias support.
+5. Full TypeScript resolution for complex package exports and path aliases.

@@ -151,9 +151,11 @@ async function scan({ root, out }) {
   const rootDir = path.resolve(process.cwd(), root);
   const scanResult = collectScanFiles(rootDir);
   const entrypointGlobs = readEntrypointGlobs(rootDir).map((glob) => resolveGlobRelativeToCwd(rootDir, glob));
+  const importResolver = buildImportResolverConfig(rootDir);
   const map = buildAgentMap({
     repo: path.basename(process.cwd()),
     entrypointGlobs,
+    importResolver,
     files: scanResult.files.map((file) => ({
       filePath: file.relativePath,
       content: readTextWithLimit(file.absolutePath, file.size)
@@ -163,7 +165,10 @@ async function scan({ root, out }) {
     ...scanResult.stats,
     entrypoints_found: map.import_graph.entrypoints.length,
     import_edges: map.import_graph.edges.length,
-    reachable_files: map.import_graph.reachable_files.length
+    reachable_files: map.import_graph.reachable_files.length,
+    alias_imports_resolved: map.import_graph.alias_imports_resolved,
+    workspace_imports_resolved: map.import_graph.workspace_imports_resolved,
+    unresolved_non_relative_imports: map.import_graph.unresolved_non_relative_imports
   };
 
   const outPath = path.resolve(process.cwd(), out);
@@ -183,6 +188,9 @@ async function scan({ root, out }) {
   console.log(`entrypoints found: ${map.scan.entrypoints_found}`);
   console.log(`import edges: ${map.scan.import_edges}`);
   console.log(`reachable files: ${map.scan.reachable_files}`);
+  console.log(`alias imports resolved: ${map.scan.alias_imports_resolved}`);
+  console.log(`workspace imports resolved: ${map.scan.workspace_imports_resolved}`);
+  console.log(`unresolved non-relative imports: ${map.scan.unresolved_non_relative_imports}`);
   console.log(`agent surfaces: ${map.surfaces.length}`);
   console.log(`agents: ${map.agents.length}`);
   console.log(`map: ${outPath}`);
@@ -574,6 +582,253 @@ function resolveGlobRelativeToCwd(rootDir, glob) {
   if (path.isAbsolute(glob)) return path.relative(process.cwd(), glob).replaceAll("\\", "/");
   const rootRelative = path.relative(process.cwd(), rootDir).replaceAll("\\", "/");
   return rootRelative ? `${rootRelative}/${normalized}` : normalized;
+}
+
+function buildImportResolverConfig(rootDir) {
+  return {
+    tsconfigPaths: readTsconfigPathAliases(rootDir),
+    workspacePackages: readWorkspacePackages(rootDir)
+  };
+}
+
+function readTsconfigPathAliases(rootDir) {
+  const configPath = findConfigUpward(rootDir, ["tsconfig.json", "jsconfig.json"]);
+  if (!configPath) return [];
+
+  let config;
+  try {
+    config = JSON.parse(stripJsonComments(fs.readFileSync(configPath, "utf8")));
+  } catch {
+    return [];
+  }
+
+  const compilerOptions = config.compilerOptions ?? {};
+  const paths = compilerOptions.paths ?? {};
+  if (!paths || typeof paths !== "object") return [];
+
+  const configDir = path.dirname(configPath);
+  const baseUrl = compilerOptions.baseUrl ? path.resolve(configDir, compilerOptions.baseUrl) : configDir;
+  const aliases = [];
+
+  for (const [aliasPattern, targetPatterns] of Object.entries(paths)) {
+    const targets = Array.isArray(targetPatterns) ? targetPatterns : [targetPatterns];
+    const normalizedTargets = targets
+      .filter((target) => typeof target === "string")
+      .map((target) => path.relative(process.cwd(), path.resolve(baseUrl, target)).replaceAll("\\", "/"))
+      .filter((target) => isWithinRootPattern(rootDir, target));
+    if (normalizedTargets.length === 0) continue;
+    aliases.push({
+      aliasPattern,
+      targetPatterns: normalizedTargets
+    });
+  }
+
+  return aliases;
+}
+
+function findConfigUpward(rootDir, names) {
+  const boundary = rootWithinCwd(rootDir) ? process.cwd() : rootDir;
+  let current = rootDir;
+  while (true) {
+    for (const name of names) {
+      const candidate = path.join(current, name);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    if (samePath(current, boundary)) return null;
+    const parent = path.dirname(current);
+    if (samePath(parent, current)) return null;
+    current = parent;
+  }
+}
+
+function rootWithinCwd(rootDir) {
+  const relative = path.relative(process.cwd(), rootDir);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function samePath(left, right) {
+  return path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
+}
+
+function stripJsonComments(input) {
+  let output = "";
+  let inString = false;
+  let quote = "";
+  let escaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+    const next = input[index + 1];
+
+    if (inLineComment) {
+      if (char === "\n") {
+        inLineComment = false;
+        output += char;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === "*" && next === "/") {
+        inBlockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        inString = false;
+        quote = "";
+      }
+      continue;
+    }
+
+    if (char === "\"" || char === "'") {
+      inString = true;
+      quote = char;
+      output += char;
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      inLineComment = true;
+      index += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      inBlockComment = true;
+      index += 1;
+      continue;
+    }
+
+    output += char;
+  }
+
+  return output;
+}
+
+function isWithinRootPattern(rootDir, relativePattern) {
+  const rootRelative = path.relative(process.cwd(), rootDir).replaceAll("\\", "/");
+  const normalized = relativePattern.replaceAll("\\", "/");
+  if (normalized.startsWith("../") || normalized.includes("/../")) return false;
+  if (!rootRelative) return true;
+  return normalized === rootRelative || normalized.startsWith(`${rootRelative}/`);
+}
+
+function readWorkspacePackages(rootDir) {
+  const rootPackageJson = path.join(rootDir, "package.json");
+  if (!fs.existsSync(rootPackageJson)) return [];
+
+  const rootPackage = readJsonFileSafe(rootPackageJson);
+  const workspacePatterns = workspacePatternsFromPackage(rootPackage);
+  if (workspacePatterns.length === 0) return [];
+
+  const packageDirs = new Set();
+  for (const pattern of workspacePatterns) {
+    for (const packageDir of findWorkspacePackageDirs(rootDir, pattern)) {
+      packageDirs.add(packageDir);
+    }
+  }
+
+  const packages = [];
+  for (const packageDir of [...packageDirs].sort()) {
+    const packageJsonPath = path.join(packageDir, "package.json");
+    const packageJson = readJsonFileSafe(packageJsonPath);
+    if (!packageJson?.name) continue;
+    packages.push({
+      packageName: packageJson.name,
+      packageRoot: path.relative(process.cwd(), packageDir).replaceAll("\\", "/"),
+      entrypoints: simplePackageEntrypoints(packageJson)
+    });
+  }
+  return packages;
+}
+
+function workspacePatternsFromPackage(packageJson) {
+  const workspaces = packageJson?.workspaces;
+  if (Array.isArray(workspaces)) return workspaces.filter((item) => typeof item === "string");
+  if (Array.isArray(workspaces?.packages)) return workspaces.packages.filter((item) => typeof item === "string");
+  return [];
+}
+
+function findWorkspacePackageDirs(rootDir, pattern) {
+  const normalizedPattern = pattern.replaceAll("\\", "/").replace(/\/+$/, "");
+  const basePrefix = normalizedPattern.split("*")[0].replace(/\/+$/, "");
+  const searchRoot = path.resolve(rootDir, basePrefix || ".");
+  if (!fs.existsSync(searchRoot)) return [];
+
+  const matcher = globMatcher(normalizedPattern);
+  const packageDirs = [];
+  const ignored = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", ".turbo", ".cache", "vendor"]);
+
+  function walk(dir) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    if (fs.existsSync(path.join(dir, "package.json"))) {
+      const relative = path.relative(rootDir, dir).replaceAll("\\", "/");
+      if (matcher(relative)) packageDirs.push(dir);
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || ignored.has(entry.name)) continue;
+      walk(path.join(dir, entry.name));
+    }
+  }
+
+  walk(searchRoot);
+  return packageDirs;
+}
+
+function globMatcher(pattern) {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "__AGENTDIFF_GLOBSTAR__")
+    .replace(/\*/g, "[^/]+");
+  const regex = new RegExp(`^${escaped.replaceAll("__AGENTDIFF_GLOBSTAR__", ".*")}$`);
+  return (value) => regex.test(value.replaceAll("\\", "/"));
+}
+
+function simplePackageEntrypoints(packageJson) {
+  const candidates = [];
+  candidates.push(...entrypointsFromExports(packageJson.exports));
+  for (const field of ["module", "main", "types"]) {
+    if (typeof packageJson[field] === "string") candidates.push(packageJson[field]);
+  }
+  candidates.push("src/index", "index");
+  return [...new Set(candidates.map((item) => item.replace(/^\.\//, "")).filter(Boolean))];
+}
+
+function entrypointsFromExports(exportsField) {
+  if (typeof exportsField === "string") return [exportsField];
+  if (!exportsField || typeof exportsField !== "object") return [];
+  const rootExport = exportsField["."] ?? exportsField;
+  if (typeof rootExport === "string") return [rootExport];
+  if (!rootExport || typeof rootExport !== "object") return [];
+  return ["import", "require", "default", "module", "types"].flatMap((field) =>
+    typeof rootExport[field] === "string" ? [rootExport[field]] : []
+  );
+}
+
+function readJsonFileSafe(filePath) {
+  try {
+    return JSON.parse(stripJsonComments(fs.readFileSync(filePath, "utf8")));
+  } catch {
+    return null;
+  }
 }
 
 function readScanLimits() {

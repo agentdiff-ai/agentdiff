@@ -40,7 +40,7 @@ Latest run: June 19, 2026 on Windows, Node `v22.11.0`.
 - This is not a claim that any scanned project has a vulnerability.
 - This is not a full static analysis benchmark.
 - This does not evaluate model output quality.
-- This does not yet cover package import graphs or `tsconfig` path aliases.
+- This uses best-effort package import and `tsconfig` path alias resolution, not full TypeScript compiler resolution.
 
 ## What Changed Because Of The Bakeoff
 
@@ -54,14 +54,14 @@ Fixes added:
 - Scan limits for file size, file count, total bytes read, and map size.
 - Generated/heavy directory skips for folders like `node_modules`, `dist`, `build`, `.next`, `.turbo`, `.cache`, `vendor`, and `generated`.
 - Partial maps with scan-limit warnings instead of hard failures.
-- JS/TS relative import graph scanning.
+- JS/TS import graph scanning for relative imports, `tsconfig`/`jsconfig` path aliases, and workspace package imports.
 - Reachable vs unreachable surface separation in maps and stranger-test reports.
 
 ## Current Lessons
 
 - Import graph reachability makes the report more useful than path/name heuristics alone.
 - Broad heuristics still produce noise, especially in documentation and skill directories.
-- Package imports and `tsconfig` aliases are the next precision gap.
+- Complex package exports, package-manager-specific resolution, and advanced TypeScript path behavior remain precision gaps.
 - The current scanner is useful for repo-awareness, not for proving runtime behavior by itself.
 
 ## Current Command

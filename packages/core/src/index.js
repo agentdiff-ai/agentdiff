@@ -205,12 +205,12 @@ export function extractCallsFromUnifiedDiff(diffText = "") {
   };
 }
 
-export function buildAgentMap({ files, repo = process.cwd(), entrypointGlobs = [] }) {
+export function buildAgentMap({ files, repo = process.cwd(), entrypointGlobs = [], importResolver = {} }) {
   const fileRecords = files.map((file) => ({
     filePath: normalizePath(file.filePath),
     content: file.content ?? ""
   }));
-  const importGraph = buildImportGraph(fileRecords);
+  const importGraph = buildImportGraph(fileRecords, importResolver);
   const initialSurfaces = fileRecords
     .map((file) => classifyChangedFile(file))
     .map((surface) => applyConfiguredEntrypoint(surface, entrypointGlobs));
@@ -879,7 +879,7 @@ function extractImportReferences(content = "") {
     }
   }
 
-  return refs.filter((ref) => ref.specifier.startsWith("."));
+  return refs;
 }
 
 function statementAt(content, index) {
@@ -893,6 +893,12 @@ function resolveRelativeImport(fromPath, specifier, fileSet) {
   if (!specifier.startsWith(".")) return null;
   const fromDir = normalizePath(fromPath).split("/").slice(0, -1).join("/");
   const raw = normalizePath(joinPath(fromDir, specifier));
+  return resolvePathCandidate(raw, fileSet);
+}
+
+function resolvePathCandidate(rawPath, fileSet) {
+  const raw = normalizePath(rawPath);
+  if (!isSafeRepoPath(raw)) return null;
   const candidates = [];
 
   candidates.push(raw);
@@ -900,6 +906,11 @@ function resolveRelativeImport(fromPath, specifier, fileSet) {
   for (const ext of JS_TS_EXTENSIONS) candidates.push(`${raw}/index${ext}`);
 
   return candidates.find((candidate) => fileSet.has(candidate)) ?? null;
+}
+
+function isSafeRepoPath(filePath) {
+  const normalized = normalizePath(filePath);
+  return Boolean(normalized) && !normalized.startsWith("/") && !normalized.startsWith("../") && !normalized.includes("/../");
 }
 
 function joinPath(base, relative) {
@@ -926,6 +937,132 @@ function dedupeEdges(edges) {
     result.push(edge);
   }
   return result.sort((left, right) => `${left.from}:${left.to}`.localeCompare(`${right.from}:${right.to}`));
+}
+
+function normalizeImportResolver(importResolver = {}) {
+  return {
+    tsconfigPaths: (importResolver.tsconfigPaths ?? []).flatMap((entry) => {
+      const aliasPattern = normalizeAliasPattern(entry.aliasPattern ?? entry.pattern);
+      const targetPatterns = entry.targetPatterns ?? (entry.targetPattern ? [entry.targetPattern] : []);
+      if (!aliasPattern || targetPatterns.length === 0) return [];
+      return [
+        {
+          aliasPattern,
+          targetPatterns: targetPatterns.map((target) => normalizePath(target)).filter(Boolean)
+        }
+      ];
+    }),
+    workspacePackages: (importResolver.workspacePackages ?? [])
+      .filter((entry) => entry?.packageName && entry?.packageRoot)
+      .map((entry) => ({
+        packageName: entry.packageName,
+        packageRoot: normalizePath(entry.packageRoot),
+        entrypoints: (entry.entrypoints ?? []).map((item) => normalizePath(item)).filter(Boolean)
+      }))
+      .sort((left, right) => right.packageName.length - left.packageName.length)
+  };
+}
+
+function normalizeAliasPattern(pattern) {
+  if (!pattern || typeof pattern !== "string") return "";
+  return pattern.replaceAll("\\", "/");
+}
+
+function resolveImportReference({ fromPath, importRef, fileSet, resolver }) {
+  const specifier = importRef.specifier;
+  if (specifier.startsWith(".")) {
+    const resolved = resolveRelativeImport(fromPath, specifier, fileSet);
+    if (!resolved) return null;
+    return {
+      to: resolved,
+      resolved_via: "relative",
+      evidence: [`relative import: ${specifier}`]
+    };
+  }
+
+  const workspaceResolved = resolveWorkspacePackageImport(specifier, resolver.workspacePackages, fileSet);
+  if (workspaceResolved) return workspaceResolved;
+
+  return resolveTsconfigPathImport(specifier, resolver.tsconfigPaths, fileSet);
+}
+
+function resolveTsconfigPathImport(specifier, tsconfigPaths, fileSet) {
+  for (const entry of tsconfigPaths) {
+    const match = matchAliasPattern(specifier, entry.aliasPattern);
+    if (!match.matched) continue;
+
+    for (const targetPattern of entry.targetPatterns) {
+      const rawTarget = applyAliasTargetPattern(targetPattern, match.capture);
+      const resolved = resolvePathCandidate(rawTarget, fileSet);
+      if (!resolved) continue;
+      return {
+        to: resolved,
+        resolved_via: "tsconfig_paths",
+        alias_pattern: entry.aliasPattern,
+        target_pattern: targetPattern,
+        evidence: [`tsconfig path alias: ${entry.aliasPattern} -> ${targetPattern}`]
+      };
+    }
+  }
+  return null;
+}
+
+function matchAliasPattern(specifier, pattern) {
+  if (!pattern.includes("*")) {
+    if (specifier === pattern) return { matched: true, capture: "" };
+    if (pattern.endsWith("/") && specifier.startsWith(pattern)) {
+      return { matched: true, capture: specifier.slice(pattern.length) };
+    }
+    return { matched: false, capture: "" };
+  }
+
+  const [prefix, suffix = ""] = pattern.split("*");
+  if (!specifier.startsWith(prefix) || (suffix && !specifier.endsWith(suffix))) {
+    return { matched: false, capture: "" };
+  }
+  return {
+    matched: true,
+    capture: specifier.slice(prefix.length, suffix ? -suffix.length : undefined)
+  };
+}
+
+function applyAliasTargetPattern(targetPattern, capture) {
+  if (targetPattern.includes("*")) return targetPattern.replaceAll("*", capture);
+  if (!capture) return targetPattern;
+  return joinPath(targetPattern, capture);
+}
+
+function resolveWorkspacePackageImport(specifier, workspacePackages, fileSet) {
+  for (const workspacePackage of workspacePackages) {
+    if (specifier !== workspacePackage.packageName && !specifier.startsWith(`${workspacePackage.packageName}/`)) {
+      continue;
+    }
+
+    const subpath = specifier === workspacePackage.packageName ? "" : specifier.slice(workspacePackage.packageName.length + 1);
+    const candidates = workspacePackageCandidatePaths(workspacePackage, subpath);
+    for (const candidate of candidates) {
+      const resolved = resolvePathCandidate(candidate, fileSet);
+      if (!resolved) continue;
+      return {
+        to: resolved,
+        resolved_via: "workspace_package",
+        package_name: workspacePackage.packageName,
+        package_root: workspacePackage.packageRoot,
+        evidence: [`workspace package import: ${workspacePackage.packageName}`]
+      };
+    }
+  }
+  return null;
+}
+
+function workspacePackageCandidatePaths(workspacePackage, subpath) {
+  const root = workspacePackage.packageRoot;
+  if (subpath) {
+    return [joinPath(root, subpath), joinPath(joinPath(root, "src"), subpath)];
+  }
+
+  const entrypoints = workspacePackage.entrypoints.length > 0 ? workspacePackage.entrypoints : ["src/index", "index"];
+  return entrypoints.map((entrypoint) => joinPath(root, entrypoint.replace(/^\.\//, "")));
 }
 
 function relatedPaths(surfaces, label) {
@@ -966,7 +1103,7 @@ function summarizeTrace(trace) {
   };
 }
 
-export function buildImportGraph(files) {
+export function buildImportGraph(files, importResolver = {}) {
   const normalizedFiles = files.map((file) => ({
     filePath: normalizePath(file.filePath),
     content: file.content ?? ""
@@ -974,16 +1111,30 @@ export function buildImportGraph(files) {
   const jsFiles = normalizedFiles.filter((file) => isJsTsPath(file.filePath));
   const fileSet = new Set(jsFiles.map((file) => file.filePath));
   const edges = [];
+  const resolver = normalizeImportResolver(importResolver);
+  const unresolvedNonRelativeImports = new Set();
+  let aliasImportsResolved = 0;
+  let workspaceImportsResolved = 0;
 
   for (const file of jsFiles) {
     for (const importRef of extractImportReferences(file.content)) {
-      const resolved = resolveRelativeImport(file.filePath, importRef.specifier, fileSet);
-      if (!resolved) continue;
+      const resolved = resolveImportReference({ fromPath: file.filePath, importRef, fileSet, resolver });
+      if (!resolved) {
+        if (!importRef.specifier.startsWith(".")) unresolvedNonRelativeImports.add(importRef.specifier);
+        continue;
+      }
+      if (resolved.resolved_via === "tsconfig_paths") aliasImportsResolved += 1;
+      if (resolved.resolved_via === "workspace_package") workspaceImportsResolved += 1;
       edges.push({
         from: file.filePath,
-        to: resolved,
+        to: resolved.to,
         import_statement: importRef.statement,
-        evidence: [`relative import: ${importRef.specifier}`]
+        resolved_via: resolved.resolved_via,
+        alias_pattern: resolved.alias_pattern,
+        target_pattern: resolved.target_pattern,
+        package_name: resolved.package_name,
+        package_root: resolved.package_root,
+        evidence: resolved.evidence
       });
     }
   }
@@ -992,7 +1143,11 @@ export function buildImportGraph(files) {
     nodes: jsFiles.map((file) => file.filePath).sort(),
     edges: dedupeEdges(edges),
     entrypoints: [],
-    reachable_files: []
+    reachable_files: [],
+    alias_imports_resolved: aliasImportsResolved,
+    workspace_imports_resolved: workspaceImportsResolved,
+    unresolved_non_relative_imports: unresolvedNonRelativeImports.size,
+    unresolved_non_relative_import_samples: [...unresolvedNonRelativeImports].sort().slice(0, 20)
   };
 }
 
