@@ -149,20 +149,30 @@ async function classify({ files, out }) {
 
 async function scan({ root, out }) {
   const rootDir = path.resolve(process.cwd(), root);
-  const filePaths = listScanFiles(rootDir).map((absolutePath) => path.relative(process.cwd(), absolutePath).replaceAll("\\", "/"));
+  const scanResult = collectScanFiles(rootDir);
   const map = buildAgentMap({
     repo: path.basename(process.cwd()),
-    files: filePaths.map((filePath) => ({
-      filePath,
-      content: readTextIfPresent(path.resolve(process.cwd(), filePath))
+    files: scanResult.files.map((file) => ({
+      filePath: file.relativePath,
+      content: readTextWithLimit(file.absolutePath, file.size)
     }))
   });
+  map.scan = scanResult.stats;
 
   const outPath = path.resolve(process.cwd(), out);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, `${JSON.stringify(map, null, 2)}\n`);
+  fs.writeFileSync(outPath, `${serializeMapWithinLimit(map)}\n`);
 
-  console.log(`scanned files: ${filePaths.length}`);
+  console.log(`files considered: ${map.scan.files_considered}`);
+  console.log(`scanned files: ${map.scan.files_scanned}`);
+  console.log(`files skipped: ${map.scan.files_skipped}`);
+  console.log(`bytes read: ${map.scan.bytes_read}`);
+  if (map.scan.scan_limit_warnings.length > 0) {
+    console.log("scan limit warnings:");
+    for (const warning of map.scan.scan_limit_warnings) {
+      console.log(`- ${warning}`);
+    }
+  }
   console.log(`agent surfaces: ${map.surfaces.length}`);
   console.log(`agents: ${map.agents.length}`);
   console.log(`map: ${outPath}`);
@@ -309,33 +319,131 @@ function readGhJson(args) {
   }
 }
 
-function listScanFiles(rootDir) {
-  const ignoredDirs = new Set([".git", "node_modules", "dist", "coverage"]);
+function collectScanFiles(rootDir) {
+  const limits = readScanLimits();
+  const ignoredDirs = new Set([
+    ".agentdiff",
+    ".cache",
+    ".git",
+    ".next",
+    ".nuxt",
+    ".pnpm-store",
+    ".turbo",
+    "build",
+    "coverage",
+    "dist",
+    "generated",
+    "node_modules",
+    "out",
+    "tmp",
+    "vendor"
+  ]);
   const allowedExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json", ".md", ".mdx", ".txt", ".yml", ".yaml"]);
-  const results = [];
+  const files = [];
+  const skipped = new Map();
+  const warnings = [];
+  let filesConsidered = 0;
+  let bytesRead = 0;
+  let stopped = false;
+
+  function skip(reason, count = 1) {
+    skipped.set(reason, (skipped.get(reason) ?? 0) + count);
+  }
 
   function walk(dir) {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (stopped) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      skip("unreadable directory");
+      return;
+    }
+
+    for (const entry of entries) {
+      if (stopped) return;
       if (entry.isDirectory()) {
-        if (ignoredDirs.has(entry.name)) continue;
-        if (entry.name === ".agentdiff") continue;
-        if (entry.name === "traces") continue;
-        if (entry.name === "runs" && dir.endsWith(".agentdiff")) continue;
+        if (ignoredDirs.has(entry.name) || entry.name === "__generated__") {
+          skip(`ignored directory: ${entry.name}`);
+          continue;
+        }
         walk(path.join(dir, entry.name));
         continue;
       }
 
       if (!entry.isFile()) continue;
+      filesConsidered += 1;
       const absolutePath = path.join(dir, entry.name);
       const ext = path.extname(entry.name).toLowerCase();
-      if (!allowedExtensions.has(ext)) continue;
-      if (fs.statSync(absolutePath).size > 200_000) continue;
-      results.push(absolutePath);
+      if (!allowedExtensions.has(ext)) {
+        skip("unsupported extension");
+        continue;
+      }
+      if (isSkippedFileName(entry.name)) {
+        skip("lockfile/minified/generated file");
+        continue;
+      }
+
+      let stat;
+      try {
+        stat = fs.statSync(absolutePath);
+      } catch {
+        skip("unreadable file");
+        continue;
+      }
+      if (!stat.isFile()) {
+        skip("not a regular file");
+        continue;
+      }
+      if (stat.size > limits.maxFileBytes) {
+        skip("file over max size");
+        continue;
+      }
+      if (files.length >= limits.maxFiles) {
+        skip("max files reached");
+        warnings.push(`partial scan: stopped after ${limits.maxFiles} files`);
+        stopped = true;
+        return;
+      }
+      if (bytesRead + stat.size > limits.maxTotalBytes) {
+        skip("max total bytes reached");
+        warnings.push(`partial scan: stopped before exceeding ${limits.maxTotalBytes} bytes`);
+        stopped = true;
+        return;
+      }
+
+      files.push({
+        absolutePath,
+        relativePath: path.relative(process.cwd(), absolutePath).replaceAll("\\", "/"),
+        size: stat.size
+      });
+      bytesRead += stat.size;
     }
   }
 
   walk(rootDir);
-  return results.sort();
+  files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+
+  const filesSkipped = [...skipped.values()].reduce((sum, count) => sum + count, 0);
+  for (const [reason, count] of skipped.entries()) {
+    if (count > 0 && ["file over max size", "max files reached", "max total bytes reached", "unreadable directory", "unreadable file"].includes(reason)) {
+      warnings.push(`skipped ${count} item(s): ${reason}`);
+    }
+  }
+
+  return {
+    files,
+    stats: {
+      files_considered: filesConsidered,
+      files_scanned: files.length,
+      files_skipped: filesSkipped,
+      bytes_read: bytesRead,
+      limits,
+      skipped_by_reason: Object.fromEntries(skipped.entries()),
+      partial: stopped,
+      scan_limit_warnings: [...new Set(warnings)]
+    }
+  };
 }
 
 async function resolveChangedFileInputs(argv) {
@@ -407,6 +515,50 @@ function readTextIfPresent(filePath) {
   const stat = fs.statSync(filePath);
   if (!stat.isFile() || stat.size > 200_000) return "";
   return fs.readFileSync(filePath, "utf8");
+}
+
+function readTextWithLimit(filePath, expectedSize) {
+  if (expectedSize > readScanLimits().maxFileBytes) return "";
+  return fs.readFileSync(filePath, "utf8");
+}
+
+function readScanLimits() {
+  return {
+    maxFileBytes: Number(process.env.AGENTDIFF_SCAN_MAX_FILE_BYTES ?? 512 * 1024),
+    maxFiles: Number(process.env.AGENTDIFF_SCAN_MAX_FILES ?? 5000),
+    maxTotalBytes: Number(process.env.AGENTDIFF_SCAN_MAX_TOTAL_BYTES ?? 25 * 1024 * 1024),
+    maxMapBytes: Number(process.env.AGENTDIFF_SCAN_MAX_MAP_BYTES ?? 10 * 1024 * 1024)
+  };
+}
+
+function isSkippedFileName(fileName) {
+  const lower = fileName.toLowerCase();
+  return (
+    lower === "package-lock.json" ||
+    lower === "pnpm-lock.yaml" ||
+    lower === "yarn.lock" ||
+    lower === "bun.lockb" ||
+    lower === "cargo.lock" ||
+    lower.endsWith(".min.js") ||
+    lower.endsWith(".min.css") ||
+    lower.endsWith(".bundle.js") ||
+    lower.endsWith(".generated.ts") ||
+    lower.endsWith(".generated.js")
+  );
+}
+
+function serializeMapWithinLimit(map) {
+  const limit = map.scan?.limits?.maxMapBytes ?? readScanLimits().maxMapBytes;
+  let serialized = JSON.stringify(map, null, 2);
+  if (Buffer.byteLength(serialized, "utf8") <= limit) return serialized;
+
+  map.scan.partial = true;
+  map.scan.scan_limit_warnings.push(`partial map: serialized map exceeded ${limit} bytes; truncated surface details`);
+  map.surfaces = map.surfaces.slice(0, 1000);
+  map.agents = map.agents.slice(0, 200);
+  map.evidence = map.evidence?.slice(0, 1000) ?? [];
+  serialized = JSON.stringify(map, null, 2);
+  return serialized;
 }
 
 function readAgentMapIfPresent() {

@@ -121,7 +121,11 @@ function runRepoBakeoff() {
       highRiskSurfaces: [],
       unmappedSurfaces: 0,
       falsePositiveCandidates: [],
-      errors: []
+      errors: [],
+      filesConsidered: 0,
+      filesSkipped: 0,
+      bytesRead: 0,
+      scanLimitWarnings: []
     };
 
     repoResult.clone = runStep(`clone ${slug}`, "git", ["clone", "--depth=1", repoUrl, cloneDir], {
@@ -149,7 +153,11 @@ function runRepoBakeoff() {
 
     const map = readJsonIfPresent(mapPath);
     const surfaces = map?.surfaces ?? [];
-    repoResult.filesScanned = Number(matchFirst(repoResult.scan.stdout, /scanned files:\s*(\d+)/) ?? 0);
+    repoResult.filesConsidered = Number(map?.scan?.files_considered ?? matchFirst(repoResult.scan.stdout, /files considered:\s*(\d+)/) ?? 0);
+    repoResult.filesScanned = Number(map?.scan?.files_scanned ?? matchFirst(repoResult.scan.stdout, /scanned files:\s*(\d+)/) ?? 0);
+    repoResult.filesSkipped = Number(map?.scan?.files_skipped ?? matchFirst(repoResult.scan.stdout, /files skipped:\s*(\d+)/) ?? 0);
+    repoResult.bytesRead = Number(map?.scan?.bytes_read ?? matchFirst(repoResult.scan.stdout, /bytes read:\s*(\d+)/) ?? 0);
+    repoResult.scanLimitWarnings = map?.scan?.scan_limit_warnings ?? [];
     repoResult.agentSurfacesFound = surfaces.length;
     repoResult.highRiskSurfaces = surfaces
       .filter((surface) => surface.risk?.length > 0)
@@ -321,9 +329,19 @@ function renderReport(report) {
       lines.push("");
       lines.push(`clone: ${statusLabel(repo.clone?.ok)}`);
       lines.push(`scan: ${statusLabel(repo.scan?.ok)}`);
+      lines.push(`files considered: ${repo.filesConsidered}`);
       lines.push(`files scanned: ${repo.filesScanned}`);
+      lines.push(`files skipped: ${repo.filesSkipped}`);
+      lines.push(`bytes read: ${repo.bytesRead}`);
       lines.push(`agent surfaces found: ${repo.agentSurfacesFound}`);
       lines.push(`unmapped surfaces: ${repo.unmappedSurfaces}`);
+      if (repo.scanLimitWarnings.length > 0) {
+        lines.push("");
+        lines.push("scan limit warnings:");
+        for (const warning of repo.scanLimitWarnings) {
+          lines.push(`- ${warning}`);
+        }
+      }
       lines.push("");
       lines.push("high-risk surfaces:");
       if (repo.highRiskSurfaces.length === 0) lines.push("- none");
