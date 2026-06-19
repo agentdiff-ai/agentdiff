@@ -41,7 +41,7 @@ async function main(argv) {
   }
 
   if (command === "scan") {
-    const out = readOption(argv, "--out") ?? ".agentdiff/map.json";
+    const out = readOption(argv, "--out") ?? ".agentdiff/runs/latest/map.json";
     const root = readOption(argv, "--root") ?? ".";
     await scan({ root, out });
     return;
@@ -477,7 +477,7 @@ Commands:
     Classify files changed between two git refs.
 
   agentdiff scan [--root <dir>] [--out <map.json>]
-    Scan the repo and write a starter .agentdiff/map.json.
+    Scan the repo and write a map artifact. Defaults to .agentdiff/runs/latest/map.json.
 
   agentdiff operator [--execute] [--task tests|demo|classify]
     Summarize local project state and propose the next allowed action. Dry-run by default.

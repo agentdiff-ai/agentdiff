@@ -97,7 +97,7 @@ function runSelfTest() {
     origin,
     cloneDir,
     results,
-    generatedOutputsIgnored: ignoredCheck.stdout.includes("!! .agentdiff/runs/") || !ignoredCheck.stdout.includes(".agentdiff/runs"),
+    generatedOutputsIgnored: generatedStatusIsIgnored(ignoredCheck.stdout),
     readmeCommandsAccurate: results.filter((result) => result.label.startsWith("README:")).every((result) => result.ok)
   };
 }
@@ -253,6 +253,14 @@ function collectDocsFriction(report) {
     }
   }
   return friction;
+}
+
+function generatedStatusIsIgnored(statusText) {
+  return String(statusText ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .every((line) => line.startsWith("!!"));
 }
 
 function renderReport(report) {
