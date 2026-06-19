@@ -25,6 +25,8 @@ The demo compares:
 - base: classify ticket, escalate for human billing review, keep ticket open
 - head: issue refund without confirmation, close ticket
 
+The GitHub Action writes `report.md` and `report.json` to the configured output directory and appends the Markdown report to the job summary.
+
 ## CLI
 
 Create starter config and local agentdiff files:

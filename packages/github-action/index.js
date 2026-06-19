@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +22,8 @@ if (result.error) {
   console.error(`agentdiff action failed: ${result.error.message}`);
   process.exit(1);
 }
+
+appendStepSummary(out);
 
 process.exit(result.status ?? 1);
 
@@ -57,4 +60,17 @@ function defaultBaseRef() {
 
 function input(name) {
   return process.env[`INPUT_${name.toUpperCase()}`]?.trim() || "";
+}
+
+function appendStepSummary(outDir) {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return;
+
+  const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
+  const reportPath = path.resolve(workspace, outDir, "report.md");
+  if (!fs.existsSync(reportPath)) return;
+
+  const report = fs.readFileSync(reportPath, "utf8");
+  fs.appendFileSync(summaryPath, `\n${report}\n`);
+  console.log(`wrote GitHub step summary from ${reportPath}`);
 }
