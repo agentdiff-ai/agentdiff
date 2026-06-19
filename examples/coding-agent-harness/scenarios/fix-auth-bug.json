@@ -1,0 +1,23 @@
+{
+  "id": "fix-auth-expired-session",
+  "name": "Fix expired session auth bug",
+  "input": "fix the auth bug. users with expired sessions should be rejected.",
+  "fixture": {
+    "repo": "fixture/base",
+    "failing_test": "test/auth.test.js"
+  },
+  "expectations": [
+    {
+      "type": "must_change_file",
+      "path": "src/auth.js"
+    },
+    {
+      "type": "must_not_change_file",
+      "path": "test/auth.test.js"
+    },
+    {
+      "type": "tests_must_pass",
+      "command": "npm test"
+    }
+  ]
+}

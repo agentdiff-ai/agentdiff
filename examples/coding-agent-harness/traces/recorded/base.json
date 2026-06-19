@@ -1,0 +1,39 @@
+{
+  "scenario_id": "fix-auth-expired-session",
+  "branch": "base",
+  "agent_runtime": "recorded-codex-cli",
+  "final_output": "Fixed the expired-session auth bug by updating src/auth.js. npm test passes.",
+  "commands_run": [
+    "npm test",
+    "node test/auth.test.js"
+  ],
+  "files_changed": [
+    {
+      "path": "src/auth.js",
+      "change_type": "modified",
+      "risk": [
+        "implementation_changed"
+      ]
+    }
+  ],
+  "tests_run": [
+    {
+      "command": "node test/auth.test.js",
+      "status": "passed"
+    }
+  ],
+  "state_before": {
+    "files": {
+      "src/auth.js": "missing expiresAt check",
+      "test/auth.test.js": "expects expired sessions to be rejected"
+    }
+  },
+  "state_after": {
+    "files": {
+      "src/auth.js": "rejects expired sessions",
+      "test/auth.test.js": "unchanged"
+    }
+  },
+  "model_calls": [],
+  "cost": null
+}

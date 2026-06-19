@@ -44,14 +44,27 @@ export function renderMarkdownReport(report) {
 
   lines.push("## trace summary");
   lines.push("");
+  if (report.traces.base.agent_runtime || report.traces.head.agent_runtime) {
+    lines.push(`base runtime: ${report.traces.base.agent_runtime ?? "unknown"}`);
+    lines.push(`head runtime: ${report.traces.head.agent_runtime ?? "unknown"}`);
+  }
   lines.push(`base tools: ${report.traces.base.tool_sequence.join(" -> ") || "none"}`);
   lines.push(`head tools: ${report.traces.head.tool_sequence.join(" -> ") || "none"}`);
+  lines.push(`base files changed: ${formatChangedFiles(report.traces.base.files_changed)}`);
+  lines.push(`head files changed: ${formatChangedFiles(report.traces.head.files_changed)}`);
+  lines.push(`base commands: ${report.traces.base.commands_run.join(" | ") || "none"}`);
+  lines.push(`head commands: ${report.traces.head.commands_run.join(" | ") || "none"}`);
   lines.push("");
   lines.push(`base final output: ${report.traces.base.final_output ?? ""}`);
   lines.push(`head final output: ${report.traces.head.final_output ?? ""}`);
   lines.push("");
 
   return lines.join("\n");
+}
+
+function formatChangedFiles(files) {
+  if (!files || files.length === 0) return "none";
+  return files.map((file) => `${file.path}${file.risk?.length ? ` (${file.risk.join(", ")})` : ""}`).join(", ");
 }
 
 function renderClassificationReport(report) {

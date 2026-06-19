@@ -48,9 +48,24 @@ async function main(argv) {
   }
 
   if (command === "run") {
+    const example = readOption(argv, "--example");
+    const out = readOption(argv, "--out") ?? ".agentdiff/runs/latest";
+    if (example) {
+      if (argv.includes("--live")) {
+        await runLiveExample({ example });
+        return;
+      }
+
+      await run({
+        base: path.join("examples", example, "traces", "recorded", "base.json"),
+        head: path.join("examples", example, "traces", "recorded", "head.json"),
+        out
+      });
+      return;
+    }
+
     const base = readRequiredOption(argv, "--base");
     const head = readRequiredOption(argv, "--head");
-    const out = readOption(argv, "--out") ?? ".agentdiff/runs/latest";
     await run({ base, head, out });
     return;
   }
@@ -85,6 +100,19 @@ async function run({ base, head, out }) {
   console.log(`agentdiff status: ${report.status}`);
   console.log(`findings: ${report.behavior_findings.length}`);
   console.log(`report: ${path.join(outDir, "report.md")}`);
+}
+
+async function runLiveExample({ example }) {
+  const harness = process.env.AGENTDIFF_HARNESS || "codex-cli";
+  const adapterPath = path.resolve(process.cwd(), "examples", example, "harnesses", `${harness}.js`);
+  if (!fs.existsSync(adapterPath)) {
+    throw new Error(`live harness adapter not found: ${adapterPath}`);
+  }
+
+  execFileSync(process.execPath, [adapterPath], {
+    cwd: process.cwd(),
+    stdio: "inherit"
+  });
 }
 
 async function classify({ files, out }) {
@@ -311,5 +339,11 @@ Commands:
 
   agentdiff run --base <trace.json> --head <trace.json> [--out <dir>]
     Compare base/head normalized traces and write report.json + report.md.
+
+  agentdiff run --example coding-agent-harness --recorded [--out <dir>]
+    Run a recorded harness demo without API keys.
+
+  AGENTDIFF_HARNESS=codex-cli agentdiff run --example coding-agent-harness --live
+    Invoke an experimental live harness adapter, which skips gracefully if unavailable.
 `);
 }

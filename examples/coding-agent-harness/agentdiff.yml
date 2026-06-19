@@ -1,0 +1,17 @@
+agentdiff:
+  entrypoints:
+    - fixture/base/src/**
+  mode: byok
+  language: javascript
+  max_cost_usd: 3.00
+
+harness:
+  default: recorded
+  recorded:
+    base_trace: traces/recorded/base.json
+    head_trace: traces/recorded/head.json
+  live:
+    adapters:
+      - codex-cli
+      - claude-agent-sdk
+      - openrouter-openai
