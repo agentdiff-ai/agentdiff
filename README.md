@@ -194,6 +194,16 @@ node scripts/outreach/draft.js docs/outreach-targets.example.json
 
 Drafts are saved to `.agentdiff/outreach/drafts.md`. Nothing is sent automatically.
 
+Render the 75-second demo video:
+
+```bash
+npm --prefix examples/remotion-demo install
+npm --prefix examples/remotion-demo run validate-data
+npm --prefix examples/remotion-demo run video
+```
+
+The generated MP4 is written to `examples/remotion-demo/dist/agentdiff-demo.mp4` and is ignored by git.
+
 ## What Agentdiff Catches Today
 
 - Changed agent files in pull requests.

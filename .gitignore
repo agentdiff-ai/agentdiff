@@ -3,4 +3,6 @@ node_modules/
 .agentdiff/outreach/
 .DS_Store
 dist/
+examples/remotion-demo/dist/
+examples/remotion-demo/node_modules/
 coverage/
