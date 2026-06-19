@@ -47,6 +47,14 @@ async function main(argv) {
     return;
   }
 
+  if (command === "operator") {
+    await operator({
+      execute: argv.includes("--execute"),
+      task: readOption(argv, "--task")
+    });
+    return;
+  }
+
   if (command === "run") {
     const example = readOption(argv, "--example");
     const out = readOption(argv, "--out") ?? ".agentdiff/runs/latest";
@@ -162,6 +170,147 @@ async function scan({ root, out }) {
   console.log(`agent surfaces: ${map.surfaces.length}`);
   console.log(`agents: ${map.agents.length}`);
   console.log(`map: ${outPath}`);
+}
+
+async function operator({ execute, task }) {
+  const config = readOperatorConfig();
+  const status = collectOperatorStatus();
+  const recommendation = recommendOperatorTask(status);
+  const proposedCommands = commandsForOperatorTask(task ?? recommendation.task);
+  const riskLevel = riskForOperatorTask(task ?? recommendation.task);
+
+  const report = [
+    "# agentdiff operator",
+    "",
+    `mode: ${execute ? "execute" : "dry_run"}`,
+    `risk: ${riskLevel}`,
+    "",
+    "## current status",
+    `branch: ${status.branch}`,
+    `git: ${status.gitStatus || "clean"}`,
+    `open pull requests: ${status.pullRequests.length}`,
+    `open issues: ${status.issues.length}`,
+    `latest report: ${status.latestReportStatus}`,
+    "",
+    "## next recommended task",
+    recommendation.summary,
+    "",
+    "## proposed commands",
+    ...proposedCommands.map((command) => `- ${command}`),
+    "",
+    "## guardrails",
+    "- dry-run by default",
+    "- no push to main without explicit approval",
+    "- no outreach sending without explicit approval",
+    "- no package publishing without explicit approval",
+    "- no repo visibility changes",
+    `- model credit cap: $${config.maxModelCreditUsd.toFixed(2)}`
+  ].join("\n");
+
+  console.log(report);
+
+  if (!execute) return;
+
+  for (const command of proposedCommands) {
+    if (!config.allowExecute.includes(command)) {
+      throw new Error(`operator refused command outside allowlist: ${command}`);
+    }
+    const [program, ...args] = command.split(/\s+/);
+    execFileSync(program, args, {
+      cwd: process.cwd(),
+      stdio: "inherit"
+    });
+  }
+}
+
+function readOperatorConfig() {
+  const configPath = path.resolve(process.cwd(), "agentdiff.operator.yml");
+  const text = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : "";
+  const allowed = [...text.matchAll(/^\s*-\s+(.+)$/gm)].map((match) => match[1].trim());
+  const maxCreditMatch = text.match(/max_model_credit_usd:\s*([0-9.]+)/);
+  return {
+    allowExecute: allowed.filter((command) => command.startsWith("npm ") || command.startsWith("node ")),
+    maxModelCreditUsd: Number(maxCreditMatch?.[1] ?? 0)
+  };
+}
+
+function collectOperatorStatus() {
+  const branch = readGitOutput(["branch", "--show-current"]) || "unknown";
+  const gitStatus = readGitOutput(["status", "--short"]);
+  const pullRequests = readGhJson(["pr", "list", "--state", "open", "--limit", "20", "--json", "number,title,isDraft,url"]);
+  const issues = readGhJson(["issue", "list", "--state", "open", "--limit", "20", "--json", "number,title,url"]);
+  const latestReport = readLatestReport();
+
+  return {
+    branch,
+    gitStatus,
+    pullRequests: Array.isArray(pullRequests) ? pullRequests : [],
+    issues: Array.isArray(issues) ? issues : [],
+    latestReportStatus: latestReport?.status ?? "none"
+  };
+}
+
+function recommendOperatorTask(status) {
+  if (status.gitStatus) {
+    return {
+      task: "tests",
+      summary: "Run the test suite before making more changes."
+    };
+  }
+
+  return {
+    task: "import_graph",
+    summary: "Build JS/TS import graph scanning next: entrypoint -> imported tool -> high-risk state mutation."
+  };
+}
+
+function commandsForOperatorTask(task) {
+  if (task === "demo") {
+    return ["node packages/cli/bin/agentdiff.js demo --out .agentdiff/runs/latest"];
+  }
+  if (task === "classify") {
+    return ["node packages/cli/bin/agentdiff.js classify --base main --head HEAD"];
+  }
+  return ["npm test"];
+}
+
+function riskForOperatorTask(task) {
+  if (task === "classify" || task === "demo" || task === "tests") return "low";
+  if (task === "import_graph") return "medium";
+  return "unknown";
+}
+
+function readLatestReport() {
+  const reportPath = path.resolve(process.cwd(), ".agentdiff", "runs", "latest", "report.json");
+  if (!fs.existsSync(reportPath)) return null;
+  try {
+    return readJson(reportPath);
+  } catch {
+    return null;
+  }
+}
+
+function readGitOutput(args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function readGhJson(args) {
+  try {
+    const output = execFileSync("gh", args, {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+    return JSON.parse(output);
+  } catch {
+    return [];
+  }
 }
 
 function listScanFiles(rootDir) {
@@ -333,6 +482,9 @@ Commands:
 
   agentdiff scan [--root <dir>] [--out <map.json>]
     Scan the repo and write a starter .agentdiff/map.json.
+
+  agentdiff operator [--execute] [--task tests|demo|classify]
+    Summarize local project state and propose the next allowed action. Dry-run by default.
 
   agentdiff demo
     Run the support-ticket regression demo.

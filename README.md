@@ -178,6 +178,14 @@ node packages/cli/bin/agentdiff.js run \
   --head examples/support-ticket-agent/traces/head.json
 ```
 
+Summarize local project state and propose the next safe task:
+
+```bash
+node packages/cli/bin/agentdiff.js operator
+```
+
+The operator is dry-run by default. `--execute` is limited to the allowlist in `agentdiff.operator.yml`; it will not push to main, send outreach, publish packages, change repo visibility, or spend above the configured model-credit cap without explicit approval.
+
 ## What Agentdiff Catches Today
 
 - Changed agent files in pull requests.

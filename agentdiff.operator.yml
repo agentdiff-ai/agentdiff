@@ -1,0 +1,13 @@
+operator:
+  mode: dry_run
+  max_model_credit_usd: 1.00
+  allow_execute:
+    - npm test
+    - node packages/cli/bin/agentdiff.js demo --out .agentdiff/runs/latest
+    - node packages/cli/bin/agentdiff.js classify --base main --head HEAD
+  approval_required:
+    - push_to_main
+    - send_outreach
+    - publish_package
+    - change_repo_visibility
+    - spend_above_cap
