@@ -147,6 +147,8 @@ The live harness runs in a temporary fixture, asks the model for a validated JSO
 
 `agentdiff init --github-action` creates this workflow at `.github/workflows/agentdiff.yml`. You can also add it manually:
 
+Current prototype installs use `EgemennSahin/agentdiff@main`. Once the first stable tag exists, pin the workflow to `EgemennSahin/agentdiff@v0`. See [docs/release.md](docs/release.md) for the release checklist.
+
 ```yaml
 name: agentdiff
 
@@ -166,6 +168,7 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Prototype install: @main. Stable install after first tag: EgemennSahin/agentdiff@v0.
       - uses: EgemennSahin/agentdiff@main
         with:
           command: classify
@@ -183,6 +186,7 @@ jobs:
 Recorded harness workflow:
 
 ```yaml
+# Prototype install: @main. Stable install after first tag: EgemennSahin/agentdiff@v0.
 - uses: EgemennSahin/agentdiff@main
   with:
     command: run

@@ -1156,8 +1156,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # Current public action path. When agentdiff publishes versioned releases,
-      # pin this to a release tag such as EgemennSahin/agentdiff@v0.
+      # Prototype install: @main follows the latest repository state.
+      # Stable install after the first tagged release: EgemennSahin/agentdiff@v0.
       # For local development inside this repo, the equivalent command is:
       # node packages/cli/bin/agentdiff.js classify --base origin/\${{ github.base_ref }} --head HEAD
       - uses: EgemennSahin/agentdiff@main

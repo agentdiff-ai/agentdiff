@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "CI for agent behavior changes",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EgemennSahin/agentdiff.git"
+  },
+  "bin": {
+    "agentdiff": "packages/cli/bin/agentdiff.js"
+  },
   "dependencies": {
     "openai": "^6.44.0"
   },

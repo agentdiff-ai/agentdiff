@@ -86,6 +86,8 @@ try {
   assert.match(workflow, /actions\/checkout@v4/);
   assert.match(workflow, /actions\/setup-node@v4/);
   assert.match(workflow, /run: npm install/);
+  assert.match(workflow, /Prototype install: @main/);
+  assert.match(workflow, /Stable install after the first tagged release: EgemennSahin\/agentdiff@v0/);
   assert.match(workflow, /uses: EgemennSahin\/agentdiff@main/);
   assert.match(workflow, /command: classify/);
   assert.match(workflow, /base: origin\/\$\{\{ github\.base_ref \}\}/);
