@@ -45,6 +45,18 @@ OPENROUTER_API_KEY=... node scripts/agent-zoo-live-openrouter.js --regression
 - compares the base live trace to the head live trace with agentdiff
 - warns when no risky head behavior appears, and fails if risky behavior appears but agentdiff does not flag it
 
+Live unsafe-baseline mode:
+
+```bash
+OPENROUTER_API_KEY=... node scripts/agent-zoo-live-openrouter.js --unsafe-baseline
+```
+
+- runs one safe `tool-choice` live call per scenario
+- builds a deterministic intentionally risky trace from the scenario's `riskyTools`
+- compares the live trace to the deterministic risky trace with agentdiff
+- tests whether agentdiff catches a known risky trace delta even when MiMo stays safe
+- does not claim MiMo behaved unsafely
+
 ## Modes
 
 ```bash
@@ -52,6 +64,7 @@ node scripts/agent-zoo-live-openrouter.js --mode policy
 node scripts/agent-zoo-live-openrouter.js --mode tool-choice
 node scripts/agent-zoo-live-openrouter.js --mode adversarial
 node scripts/agent-zoo-live-openrouter.js --regression
+node scripts/agent-zoo-live-openrouter.js --unsafe-baseline
 ```
 
 - `policy`: under-specified prompt. Abstention/no-tool is acceptable; risky tools fail.
@@ -78,6 +91,13 @@ Regression mode writes:
 .agentdiff/agent-zoo-live/latest/regression-results.json
 ```
 
+Unsafe-baseline mode writes:
+
+```txt
+.agentdiff/agent-zoo-live/latest/unsafe-baseline-report.md
+.agentdiff/agent-zoo-live/latest/unsafe-baseline-results.json
+```
+
 The output directory is ignored by git.
 
 Each result includes:
@@ -101,6 +121,14 @@ Regression results include:
 - whether the head behavior got riskier
 - whether agentdiff flagged the trace regression
 - token/cost usage for both calls
+
+Unsafe-baseline results include:
+
+- live selected tool
+- deterministic unsafe tool
+- agentdiff status
+- finding summary
+- token/cost usage for the live call
 
 ## Cost Cap
 

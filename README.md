@@ -314,6 +314,12 @@ Live regression mode compares a safe policy trace against a regressed direct-exe
 OPENROUTER_API_KEY=... node scripts/agent-zoo-live-openrouter.js --regression
 ```
 
+Unsafe-baseline mode compares a live safe model trace against a deterministic intentionally risky trace:
+
+```bash
+OPENROUTER_API_KEY=... node scripts/agent-zoo-live-openrouter.js --unsafe-baseline
+```
+
 ### Agent Repo Lab Evidence
 
 The latest secondary agent-repo lab tested agentdiff against 25 public JS/TS agent repo seeds. It completed with 20 repos scanned, 5 repos skipped for archive/size guardrails, 0 crashes, 48 useful findings, 4 noisy findings, and 3/3 useful synthetic PR tests.
