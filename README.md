@@ -25,7 +25,7 @@ The demo compares:
 - base: classify ticket, escalate for human billing review, keep ticket open
 - head: issue refund without confirmation, close ticket
 
-The GitHub Action writes `report.md` and `report.json` to the configured output directory and appends the Markdown report to the job summary.
+The GitHub Action writes `report.md` and `report.json` to the configured output directory, appends the Markdown report to the job summary, and updates one sticky pull request comment marked with `<!-- agentdiff-report -->`.
 
 ## CLI
 
@@ -83,6 +83,7 @@ jobs:
           command: classify
           base: origin/${{ github.base_ref }}
           head: HEAD
+          github-token: ${{ github.token }}
 ```
 
 ## Why This Matters
