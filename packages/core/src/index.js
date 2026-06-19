@@ -1342,7 +1342,10 @@ function resolveImportReference({ fromPath, importRef, fileSet, resolver }) {
   const workspaceResolved = resolveWorkspacePackageImport(specifier, resolver.workspacePackages, fileSet);
   if (workspaceResolved) return workspaceResolved;
 
-  return resolveTsconfigPathImport(specifier, resolver.tsconfigPaths, fileSet);
+  const tsconfigResolved = resolveTsconfigPathImport(specifier, resolver.tsconfigPaths, fileSet);
+  if (tsconfigResolved) return tsconfigResolved;
+
+  return resolveProjectAliasImport(fromPath, specifier, fileSet);
 }
 
 function resolveTsconfigPathImport(specifier, tsconfigPaths, fileSet) {
@@ -1439,6 +1442,59 @@ function workspacePackageExportCandidatePaths(workspacePackage, subpath) {
     }
   }
   return candidates;
+}
+
+function resolveProjectAliasImport(fromPath, specifier, fileSet) {
+  const match = specifier.match(/^(@|~)\/(.+)$/);
+  if (!match) return null;
+
+  const aliasPrefix = `${match[1]}/`;
+  const capture = normalizePath(match[2]);
+  if (!capture || capture.startsWith("../") || capture.includes("/../")) return null;
+
+  const candidates = projectAliasCandidatePaths(fromPath, capture);
+  for (const candidate of candidates) {
+    const resolved = resolvePathCandidate(candidate, fileSet);
+    if (!resolved) continue;
+    return {
+      to: resolved.path,
+      resolved_via: "project_alias",
+      alias_pattern: `${aliasPrefix}*`,
+      target_pattern: candidate.endsWith(capture) ? candidate.slice(0, -capture.length) + "*" : candidate,
+      specifier_ext: resolved.specifier_ext,
+      resolved_source_ext: resolved.resolved_source_ext,
+      note: resolved.note,
+      evidence: [`project-local alias import: ${aliasPrefix} -> nearest existing project file`]
+    };
+  }
+  return null;
+}
+
+function projectAliasCandidatePaths(fromPath, capture) {
+  const fromDir = normalizePath(fromPath).split("/").slice(0, -1).join("/");
+  const ancestors = pathAncestors(fromDir);
+  const candidates = [];
+  const seen = new Set();
+
+  for (const anchor of ancestors) {
+    for (const candidate of [joinPath(anchor, capture), joinPath(joinPath(anchor, "src"), capture)]) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates;
+}
+
+function pathAncestors(dirPath) {
+  const normalized = normalizePath(dirPath);
+  const parts = normalized ? normalized.split("/") : [];
+  const ancestors = [];
+  for (let index = parts.length; index >= 0; index -= 1) {
+    ancestors.push(parts.slice(0, index).join("/"));
+  }
+  return ancestors;
 }
 
 function classifyUnresolvedImport({ specifier, resolver }) {
@@ -1607,7 +1663,7 @@ export function buildImportGraph(files, importResolver = {}) {
         }
         continue;
       }
-      if (resolved.resolved_via === "tsconfig_paths") aliasImportsResolved += 1;
+      if (resolved.resolved_via === "tsconfig_paths" || resolved.resolved_via === "project_alias") aliasImportsResolved += 1;
       if (resolved.resolved_via === "workspace_package") workspaceImportsResolved += 1;
       edges.push({
         from: file.filePath,

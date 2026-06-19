@@ -286,7 +286,7 @@ The lab clones public JS/TS agent repos into temp directories, runs agentdiff wi
 
 ### Agent Repo Lab Evidence
 
-The latest secondary agent-repo lab tested agentdiff against 20 public JS/TS agent repos. It completed with 20/20 repos scanned, 0 crashes, 55 useful findings, 2 noisy findings, and 3/3 useful synthetic PR tests.
+The latest secondary agent-repo lab tested agentdiff against 25 public JS/TS agent repo seeds. It completed with 20 repos scanned, 5 repos skipped for archive/size guardrails, 0 crashes, 48 useful findings, 4 noisy findings, and 3/3 useful synthetic PR tests.
 
 This is product evidence, not a security audit, not a benchmark, and not a claim that external repos are unsafe. The goal is to keep agentdiff honest about first-run survivability, useful signal, noise, and missed agent surfaces on unfamiliar repos.
 

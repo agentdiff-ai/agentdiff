@@ -241,6 +241,79 @@ const reachableCharge = aliasWorkspaceMap.surfaces.find((surface) => surface.pat
 assert.ok(reachableCharge);
 assert.equal(reachableCharge.reachable_from_entrypoint, true);
 
+const projectAliasMap = buildAgentMap({
+  repo: "fixture",
+  entrypointGlobs: ["app/api/chat/route.ts", "app/agent.ts"],
+  files: [
+    {
+      filePath: "app/agent.ts",
+      content: `
+import { sendEmail } from "@/tools/sendEmail";
+import { missing } from "@/missing/tool";
+import { unsafe } from "@/../outside/secret";
+export async function agent() {
+  await sendEmail();
+  return { missing, unsafe };
+}
+`
+    },
+    {
+      filePath: "app/api/chat/route.ts",
+      content: `
+import { voltagent } from "@/voltagent";
+export async function POST() {
+  return voltagent();
+}
+`
+    },
+    {
+      filePath: "src/tools/sendEmail.ts",
+      content: `export function sendEmail(recipientEmail) { return recipientEmail; }`
+    },
+    {
+      filePath: "voltagent.ts",
+      content: `export function voltagent() { return true; }`
+    },
+    {
+      filePath: "docs/tools.md",
+      content: `# tools\nsend email and refund users`
+    }
+  ]
+});
+
+const projectAliasEdges = projectAliasMap.import_graph.edges;
+assert.equal(
+  projectAliasEdges.some(
+    (edge) =>
+      edge.from === "app/agent.ts" &&
+      edge.to === "src/tools/sendEmail.ts" &&
+      edge.resolved_via === "project_alias" &&
+      edge.alias_pattern === "@/*"
+  ),
+  true
+);
+assert.equal(
+  projectAliasEdges.some(
+    (edge) => edge.from === "app/api/chat/route.ts" && edge.to === "voltagent.ts" && edge.resolved_via === "project_alias"
+  ),
+  true
+);
+assert.equal(projectAliasEdges.some((edge) => edge.import_statement.includes("@/../outside/secret")), false);
+assert.equal(projectAliasMap.import_graph.alias_imports_resolved, 2);
+assert.equal(projectAliasMap.import_graph.unresolved_import_buckets.alias_like.count, 2);
+assert.ok(projectAliasMap.import_graph.unresolved_import_buckets.alias_like.samples.some((sample) => sample.specifier === "@/missing/tool"));
+assert.ok(projectAliasMap.import_graph.unresolved_import_buckets.alias_like.samples.some((sample) => sample.specifier === "@/../outside/secret"));
+
+const reachableSendEmail = projectAliasMap.surfaces.find((surface) => surface.path === "src/tools/sendEmail.ts");
+assert.ok(reachableSendEmail);
+assert.equal(reachableSendEmail.reachable_from_entrypoint, true);
+
+const docsToolsSurface = projectAliasMap.surfaces.find((surface) => surface.path === "docs/tools.md");
+assert.ok(docsToolsSurface);
+assert.equal(docsToolsSurface.surface_category, "docs_example");
+assert.equal(docsToolsSurface.reachable_from_entrypoint, false);
+assert.ok(docsToolsSurface.confidence <= 0.4);
+
 const runtimeSpecifierMap = buildAgentMap({
   repo: "fixture",
   entrypointGlobs: [
