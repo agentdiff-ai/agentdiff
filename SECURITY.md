@@ -28,9 +28,9 @@ If you report a security issue, redact secrets and provide the smallest safe rep
 
 ## Reporting Security Issues
 
-Security reporting contact: `security@example.com` placeholder.
+Use GitHub private vulnerability reporting for `agentdiff-ai/agentdiff` when it is enabled.
 
-Until a dedicated disclosure address is configured, open a minimal public issue that asks for a private contact path and does not include exploit details or secrets.
+If private vulnerability reporting is not available yet, open a minimal public issue that asks for a private contact path and does not include exploit details, secrets, traces, or private repository code.
 
 ## Supported Versions
 
