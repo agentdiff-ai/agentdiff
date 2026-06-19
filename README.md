@@ -6,6 +6,15 @@ Normal CI says the code runs. Agentdiff says whether the agent got riskier.
 
 Agentdiff runs in GitHub Actions, writes a PR-readable report, and updates one sticky pull request comment. The current wedge is state-mutating agents: support agents, editor agents, CRM agents, coding agents, and internal ops agents that call tools and change durable state.
 
+## Project Status
+
+- Early prototype.
+- Open-source under Apache-2.0.
+- BYOK/local CI first.
+- JavaScript/TypeScript first.
+- No hosted backend in v0.
+- Current focus: useful PR reports for agent behavior risk.
+
 ## Live Demo PRs
 
 ### 1. Unsafe Behavior Change
