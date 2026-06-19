@@ -53,6 +53,36 @@ node packages/cli/bin/agentdiff.js run \
   --head examples/support-ticket-agent/traces/head.json
 ```
 
+## GitHub Action
+
+Minimal pull request workflow:
+
+```yaml
+name: agentdiff
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  agentdiff:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: EgemennSahin/agentdiff@main
+        with:
+          command: classify
+          base: origin/${{ github.base_ref }}
+          head: HEAD
+```
+
 ## Why This Matters
 
 Normal CI can say the code still runs. Agentdiff asks whether the agent now behaves dangerously.

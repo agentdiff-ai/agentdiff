@@ -1,0 +1,26 @@
+name: agentdiff
+description: CI for AI agent behavior changes
+
+inputs:
+  command:
+    description: Command to run. Supported now: classify or demo.
+    required: false
+    default: classify
+  base:
+    description: Base git ref for classify mode.
+    required: false
+  head:
+    description: Head git ref for classify mode.
+    required: false
+    default: HEAD
+  files:
+    description: Comma-separated file list for classify mode. If set, base/head are ignored.
+    required: false
+  out:
+    description: Output directory for report.json and report.md.
+    required: false
+    default: .agentdiff/runs/latest
+
+runs:
+  using: node20
+  main: packages/github-action/index.js

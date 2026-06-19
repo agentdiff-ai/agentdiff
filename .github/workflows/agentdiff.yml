@@ -1,0 +1,31 @@
+name: agentdiff
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./
+        with:
+          command: classify
+          base: origin/${{ github.base_ref || 'main' }}
+          head: HEAD
+          out: .agentdiff/runs/latest
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agentdiff-report
+          path: .agentdiff/runs/latest
