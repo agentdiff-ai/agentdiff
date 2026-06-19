@@ -2,62 +2,64 @@
 
 Open-source CI for AI agent behavior changes.
 
-Agentdiff compares base/head agent traces and reports behavior regressions before a pull request merges. The first wedge is state-mutating agents: support agents, editor agents, CRM agents, coding agents, and internal ops agents that call tools and change durable state.
+Normal CI says the code runs. Agentdiff says whether the agent got riskier.
 
-## Demo
+Agentdiff runs in GitHub Actions, writes a PR-readable report, and updates one sticky pull request comment. The current wedge is state-mutating agents: support agents, editor agents, CRM agents, coding agents, and internal ops agents that call tools and change durable state.
 
-Run the first support-ticket behavior regression demo:
+## Live Demo PRs
 
-```bash
-node packages/cli/bin/agentdiff.js demo
-```
+### 1. Unsafe Behavior Change
 
-Output:
+Draft PR: [Demo: unsafe support refund behavior](https://github.com/EgemennSahin/agentdiff/pull/1)
+
+This PR changes an existing support agent from safe escalation to direct execution.
+
+Agentdiff reports:
 
 ```txt
-agentdiff status: fail
-findings: 4
-report: .agentdiff/runs/latest/report.md
+High-risk agent behavior added
+
+added calls:
+- issue_refund (high-risk)
+- close_ticket (high-risk)
+
+removed calls:
+- escalate_ticket (safer/guardrail)
+
+why it matters:
+This PR appears to add state-mutating or external-side-effect calls while removing safer escalation, review, confirmation, or validation behavior.
 ```
 
-The demo compares:
+The point: normal tests can pass while agent behavior becomes more dangerous.
 
-- base: classify ticket, escalate for human billing review, keep ticket open
-- head: issue refund without confirmation, close ticket
+### 2. Map Drift / New Unmapped Tool
 
-The GitHub Action writes `report.md` and `report.json` to the configured output directory, appends the Markdown report to the job summary, and updates one sticky pull request comment marked with `<!-- agentdiff-report -->`.
+Draft PR: [Demo: new unmapped billing tool](https://github.com/EgemennSahin/agentdiff/pull/2)
 
-## CLI
+This PR adds a new billing tool that is not present in `.agentdiff/map.json`.
 
-Create starter config and local agentdiff files:
+Agentdiff reports:
 
-```bash
-node packages/cli/bin/agentdiff.js init
+```txt
+New unmapped high-risk tool: examples/demo-support-agent/src/tools/sendInvoice.js
+
+risk: state_mutation, external_side_effect
+
+evidence:
+- exports high-risk function sendInvoice
+- exported function sendInvoice suggests state mutation
+- name or content suggests external side effect
+- function args include recipientEmail, amountUsd, customerId
+
+recommendation:
+Add this tool to .agentdiff/map.json and create a scenario before merge.
 ```
 
-Classify changed files without running an agent harness:
+The point: evals rot when repos change faster than the agent map.
 
-```bash
-node packages/cli/bin/agentdiff.js classify --files examples/support-ticket-agent/head/src/supportAgent.js
-```
+## Install
 
-Generate a starter agent map:
-
-```bash
-node packages/cli/bin/agentdiff.js scan --root examples/support-ticket-agent/head --out .agentdiff/map.json
-```
-
-Compare two normalized traces:
-
-```bash
-node packages/cli/bin/agentdiff.js run \
-  --base examples/support-ticket-agent/traces/base.json \
-  --head examples/support-ticket-agent/traces/head.json
-```
-
-## GitHub Action
-
-Minimal pull request workflow:
+Add this workflow to `.github/workflows/agentdiff.yml`:
 
 ```yaml
 name: agentdiff
@@ -67,7 +69,7 @@ on:
     branches: [main]
 
 jobs:
-  agentdiff:
+  classify:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -84,35 +86,88 @@ jobs:
           base: origin/${{ github.base_ref }}
           head: HEAD
           github-token: ${{ github.token }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agentdiff-report
+          path: .agentdiff/runs/latest
 ```
 
-## Why This Matters
+The action writes:
 
-Normal CI can say the code still runs. Agentdiff asks whether the agent now behaves dangerously.
+- `.agentdiff/runs/latest/report.md`
+- `.agentdiff/runs/latest/report.json`
+- GitHub job summary
+- one sticky PR comment marked with `<!-- agentdiff-report -->`
 
-Example finding:
+## Local Commands
 
-```txt
-issue_refund ran without required confirmation
-severity: critical
-reason: The trace marks this tool as requiring confirmation, but the head run did not confirm it.
+Run the behavior-regression demo:
+
+```bash
+node packages/cli/bin/agentdiff.js demo
 ```
 
-## Current Scope
+Generate a starter map:
 
-This repo is intentionally at MVP stage.
+```bash
+node packages/cli/bin/agentdiff.js scan --root examples/demo-support-agent --out .agentdiff/map.json
+```
+
+Classify the current branch against `main`:
+
+```bash
+node packages/cli/bin/agentdiff.js classify --base main --head HEAD
+```
+
+Compare two normalized traces:
+
+```bash
+node packages/cli/bin/agentdiff.js run \
+  --base examples/support-ticket-agent/traces/base.json \
+  --head examples/support-ticket-agent/traces/head.json
+```
+
+## What Agentdiff Catches Today
+
+- Changed agent files in pull requests.
+- Added high-risk calls such as `issue_refund`, `close_ticket`, and `sendInvoice`.
+- Removed safer calls such as escalation, review, validation, or confirmation paths.
+- New unmapped agent surfaces when `.agentdiff/map.json` exists.
+- Tool files under `/tools/`.
+- State-mutating and external-side-effect risk using path, function name, argument, and diff heuristics.
+
+## What It Does Not Do Yet
 
 - No hosted backend.
 - No billing.
 - No dashboard.
 - No private repo ingestion.
-- No generic eval platform.
+- No production trace ingestion.
+- No broad framework integration.
+- No full import graph yet.
+- No behavior harness execution in PRs yet.
+- No LLM judge or generic eval generation.
 
-The first product surface is a CLI and GitHub Action that produce a PR-readable report.
+## Why This Is Different From Eval Dashboards
+
+- PR-native: the report appears where merge decisions happen.
+- Map-aware: it checks whether new agent surfaces are missing from `.agentdiff/map.json`.
+- State-focused: it prioritizes tool calls and durable state risk, not just final text quality.
+- Open-source and BYOK-first: v0 runs in your CI without an agentdiff-hosted backend.
+
+## Current Architecture
+
+```txt
+git diff -> classify changed surfaces -> compare with .agentdiff/map.json -> render report -> PR comment
+```
+
+The GitHub Action is a thin wrapper around the CLI. Anything the action does should be reproducible locally.
 
 ## Trace Contract
 
-Agentdiff starts with normalized trace files so teams can adapt any framework.
+The behavior demo uses normalized traces so future harness integrations can adapt any framework.
 
 ```json
 {
@@ -134,13 +189,10 @@ Agentdiff starts with normalized trace files so teams can adapt any framework.
 }
 ```
 
-## Build Order
+## Near-Term Roadmap
 
-1. CLI
-2. Trace diff
-3. Markdown report
-4. Sample broken PR
-5. GitHub Action
-6. Map drift detector
-7. Harness contract
-8. State fixture diff
+1. Import graph scanning for JS/TS.
+2. Scenario schema.
+3. Harness contract.
+4. Base/head behavior runner.
+5. State fixture diff.
