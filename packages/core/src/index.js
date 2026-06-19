@@ -8,6 +8,43 @@ const HIGH_RISK_TAGS = new Set([
   "customer_visible"
 ]);
 
+const HIGH_RISK_CALL_WORDS = [
+  "refund",
+  "charge",
+  "send",
+  "delete",
+  "close",
+  "publish",
+  "update",
+  "create",
+  "approve",
+  "reject",
+  "revoke",
+  "grant"
+];
+
+const SAFER_CALL_WORDS = [
+  "escalate",
+  "review",
+  "require_confirmation",
+  "ask_confirmation",
+  "draft",
+  "validate",
+  "check_policy"
+];
+
+const IGNORED_CALLS = new Set([
+  "if",
+  "for",
+  "while",
+  "switch",
+  "catch",
+  "function",
+  "return",
+  "console",
+  "log"
+]);
+
 export function readJson(path) {
   return JSON.parse(fs.readFileSync(path, "utf8"));
 }
@@ -101,6 +138,7 @@ export function classifyChangedFile({ filePath, content = "" }) {
 
 export function buildClassificationReport({ files, repo = process.cwd() }) {
   const changedSurfaces = files.map((file) => classifyChangedFile(file));
+  const diffAwareFindings = files.flatMap((file) => buildDiffAwareFindings(file));
   const mapDrift = changedSurfaces
     .filter((surface) => surface.label !== "not_agent_related")
     .map((surface) => ({
@@ -113,7 +151,7 @@ export function buildClassificationReport({ files, repo = process.cwd() }) {
       recommendation: recommendationForSurface(surface)
     }));
 
-  const status = statusFromFindings(mapDrift);
+  const status = statusFromFindings([...diffAwareFindings, ...mapDrift]);
 
   return {
     run_id: new Date().toISOString().replace(/[:.]/g, "-"),
@@ -121,12 +159,33 @@ export function buildClassificationReport({ files, repo = process.cwd() }) {
     mode: "classify",
     status,
     changed_surfaces: changedSurfaces,
+    diff_aware_findings: diffAwareFindings,
     map_drift: mapDrift,
     behavior_findings: [],
     cost: {
       estimated_cost_usd: 0,
       actual_cost_usd: 0
     }
+  };
+}
+
+export function extractCallsFromUnifiedDiff(diffText = "") {
+  const added = [];
+  const removed = [];
+
+  for (const line of diffText.split(/\r?\n/)) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+")) {
+      added.push(...extractCallsFromCodeLine(line.slice(1)));
+    }
+    if (line.startsWith("-")) {
+      removed.push(...extractCallsFromCodeLine(line.slice(1)));
+    }
+  }
+
+  return {
+    added_calls: unique(added),
+    removed_calls: unique(removed)
   };
 }
 
@@ -324,6 +383,85 @@ function recommendationForSurface(surface) {
   }
 
   return "Review whether this surface belongs in .agentdiff/map.json.";
+}
+
+function buildDiffAwareFindings(file) {
+  if (!file.diffText) return [];
+
+  const calls = extractCallsFromUnifiedDiff(file.diffText);
+  const addedHighRiskCalls = calls.added_calls.filter(isHighRiskCall);
+  const removedSaferCalls = calls.removed_calls.filter(isSaferCall);
+
+  if (calls.added_calls.length === 0 && calls.removed_calls.length === 0) {
+    return [];
+  }
+
+  if (addedHighRiskCalls.length === 0 && removedSaferCalls.length === 0) {
+    return [];
+  }
+
+  const severity = addedHighRiskCalls.length > 0 ? "high" : "medium";
+  const evidence = [
+    ...addedHighRiskCalls.map((call) => `added high-risk call: ${call}`),
+    ...removedSaferCalls.map((call) => `removed safer call: ${call}`)
+  ];
+
+  return [
+    {
+      type: "behavior_surface_change",
+      finding_type: "behavior_surface_change",
+      path: file.filePath,
+      severity,
+      title: addedHighRiskCalls.length > 0 ? "High-risk agent behavior added" : "Agent behavior guardrail changed",
+      added_calls: calls.added_calls,
+      removed_calls: calls.removed_calls,
+      added_high_risk_calls: addedHighRiskCalls,
+      removed_safer_calls: removedSaferCalls,
+      evidence,
+      reason: reasonForDiffAwareFinding({ addedHighRiskCalls, removedSaferCalls }),
+      recommendation: "Review before merge. Add confirmation, policy checks, or an approval scenario if this behavior is intended."
+    }
+  ];
+}
+
+function extractCallsFromCodeLine(line) {
+  const calls = [];
+  const regex = /\b(?:[A-Za-z_$][\w$]*\.)?([A-Za-z_$][\w$]*)\s*\(/g;
+  let match;
+
+  while ((match = regex.exec(line)) !== null) {
+    const call = match[1];
+    if (!call || IGNORED_CALLS.has(call)) continue;
+    calls.push(call);
+  }
+
+  return calls;
+}
+
+function isHighRiskCall(call) {
+  const normalized = call.toLowerCase();
+  return HIGH_RISK_CALL_WORDS.some((word) => normalized.includes(word));
+}
+
+function isSaferCall(call) {
+  const normalized = call.toLowerCase();
+  return SAFER_CALL_WORDS.some((word) => normalized.includes(word));
+}
+
+function reasonForDiffAwareFinding({ addedHighRiskCalls, removedSaferCalls }) {
+  if (addedHighRiskCalls.length > 0 && removedSaferCalls.length > 0) {
+    return "This PR appears to add state-mutating or external-side-effect calls while removing safer escalation, review, confirmation, or validation behavior.";
+  }
+
+  if (addedHighRiskCalls.length > 0) {
+    return "This PR appears to add state-mutating or external-side-effect calls in an agent surface.";
+  }
+
+  return "This PR appears to remove escalation, review, confirmation, or validation behavior from an agent surface.";
+}
+
+function unique(values) {
+  return [...new Set(values)];
 }
 
 function relatedPaths(surfaces, label) {

@@ -35,7 +35,7 @@ async function main(argv) {
 
   if (command === "classify") {
     const out = readOption(argv, "--out") ?? ".agentdiff/runs/latest";
-    const files = await resolveChangedFiles(argv);
+    const files = await resolveChangedFileInputs(argv);
     await classify({ files, out });
     return;
   }
@@ -95,9 +95,10 @@ async function classify({ files, out }) {
   const outDir = path.resolve(process.cwd(), out);
   const report = buildClassificationReport({
     repo: path.basename(process.cwd()),
-    files: files.map((filePath) => ({
-      filePath,
-      content: readTextIfPresent(path.resolve(process.cwd(), filePath))
+    files: files.map((file) => ({
+      filePath: file.filePath,
+      content: readTextIfPresent(path.resolve(process.cwd(), file.filePath)),
+      diffText: file.diffText
     }))
   });
   const markdown = renderMarkdownReport(report);
@@ -162,10 +163,17 @@ function listScanFiles(rootDir) {
   return results.sort();
 }
 
-async function resolveChangedFiles(argv) {
+async function resolveChangedFileInputs(argv) {
   const explicit = readOption(argv, "--files");
   if (explicit) {
-    return explicit.split(",").map((item) => item.trim()).filter(Boolean);
+    return explicit
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((filePath) => ({
+        filePath,
+        diffText: readWorkingTreeDiff(filePath)
+      }));
   }
 
   const base = readOption(argv, "--base");
@@ -179,7 +187,32 @@ async function resolveChangedFiles(argv) {
     encoding: "utf8"
   });
 
-  return output.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+  return output
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((filePath) => ({
+      filePath,
+      diffText: readGitDiffForFile({ base, head, filePath })
+    }));
+}
+
+function readGitDiffForFile({ base, head, filePath }) {
+  return execFileSync("git", ["diff", "--unified=80", base, head, "--", filePath], {
+    cwd: process.cwd(),
+    encoding: "utf8"
+  });
+}
+
+function readWorkingTreeDiff(filePath) {
+  try {
+    return execFileSync("git", ["diff", "--unified=80", "--", filePath], {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+  } catch {
+    return "";
+  }
 }
 
 function readOption(argv, name) {
