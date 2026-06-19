@@ -29,7 +29,7 @@ async function main(argv) {
   }
 
   if (command === "init") {
-    await init({ force: argv.includes("--force") });
+    await init({ force: argv.includes("--force"), githubAction: argv.includes("--github-action") });
     return;
   }
 
@@ -81,15 +81,21 @@ async function main(argv) {
   throw new Error(`unknown command: ${command}`);
 }
 
-async function init({ force }) {
+async function init({ force, githubAction }) {
   const signals = detectOnboardingSignals(process.cwd());
   writeFileSafe("agentdiff.yml", starterConfig(signals), { force });
   writeFileSafe(path.join(".agentdiff", "map.json"), `${JSON.stringify(starterMap(), null, 2)}\n`, { force });
   writeFileSafe(path.join(".agentdiff", "scenarios", "starter.json"), `${JSON.stringify(starterScenario(), null, 2)}\n`, { force });
+  if (githubAction) {
+    writeFileSafe(path.join(".github", "workflows", "agentdiff.yml"), starterGitHubWorkflow(), { force });
+  }
 
   console.log("created agentdiff.yml");
   console.log("created .agentdiff/map.json");
   console.log("created .agentdiff/scenarios/starter.json");
+  if (githubAction) {
+    console.log("created .github/workflows/agentdiff.yml");
+  }
   console.log("");
   console.log("detected:");
   for (const line of summarizeOnboardingSignals(signals)) {
@@ -101,8 +107,12 @@ async function init({ force }) {
   console.log("   node packages/cli/bin/agentdiff.js scan");
   console.log("2. review the generated map:");
   console.log("   .agentdiff/runs/latest/map.json");
-  console.log("3. install the GitHub Action:");
-  console.log("   copy the workflow from README.md -> Install into .github/workflows/agentdiff.yml");
+  if (githubAction) {
+    console.log("3. open a pull request and check the sticky agentdiff comment");
+  } else {
+    console.log("3. install the GitHub Action:");
+    console.log("   rerun init with --github-action or copy the workflow from README.md -> Install");
+  }
   console.log("");
   console.log("tip: suppressions require reason and expires; suppressed findings stay visible in reports.");
 }
@@ -1120,6 +1130,45 @@ report:
 `;
 }
 
+function starterGitHubWorkflow() {
+  return `name: agentdiff
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      # Current public action path. When agentdiff publishes versioned releases,
+      # pin this to a release tag such as EgemennSahin/agentdiff@v0.
+      # For local development inside this repo, the equivalent command is:
+      # node packages/cli/bin/agentdiff.js classify --base origin/\${{ github.base_ref }} --head HEAD
+      - uses: EgemennSahin/agentdiff@main
+        with:
+          command: classify
+          base: origin/\${{ github.base_ref }}
+          head: HEAD
+          github-token: \${{ github.token }}
+`;
+}
+
 function dedupe(values) {
   return [...new Set(values)];
 }
@@ -1148,7 +1197,7 @@ function printHelp() {
 CI for agent behavior changes.
 
 Commands:
-  agentdiff init [--force]
+  agentdiff init [--force] [--github-action]
     Create agentdiff.yml, .agentdiff/map.json, and a starter scenario.
 
   agentdiff classify --files <path,path> [--out <dir>]

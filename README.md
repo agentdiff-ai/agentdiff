@@ -99,10 +99,10 @@ cd agentdiff
 npm install
 ```
 
-Create starter config:
+Create starter config and a GitHub Action workflow:
 
 ```bash
-node packages/cli/bin/agentdiff.js init
+node packages/cli/bin/agentdiff.js init --github-action
 ```
 
 Scan the repo and review the starter map:
@@ -117,7 +117,7 @@ Review:
 .agentdiff/runs/latest/map.json
 ```
 
-Then install the GitHub Action from the section below so agentdiff can comment on PRs.
+Then open a pull request and check the sticky agentdiff comment. Classify mode does not require a hosted backend or model API keys.
 
 Run the local behavior demo when you want a known failing example:
 
@@ -145,7 +145,7 @@ The live harness runs in a temporary fixture, asks the model for a validated JSO
 
 ## Install
 
-Add this workflow to `.github/workflows/agentdiff.yml`:
+`agentdiff init --github-action` creates this workflow at `.github/workflows/agentdiff.yml`. You can also add it manually:
 
 ```yaml
 name: agentdiff
