@@ -1,0 +1,42 @@
+name: release v0 channel
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-v0
+  cancel-in-progress: false
+
+jobs:
+  release-v0:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Test
+        run: npm test
+
+      - name: Stranger tests
+        run: npm run stranger
+
+      - name: Move v0 tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f v0 "$GITHUB_SHA"
+          git push origin refs/tags/v0 --force

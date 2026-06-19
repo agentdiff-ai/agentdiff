@@ -86,9 +86,9 @@ try {
   assert.match(workflow, /actions\/checkout@v4/);
   assert.match(workflow, /actions\/setup-node@v4/);
   assert.match(workflow, /run: npm install/);
-  assert.match(workflow, /Public prototype install/);
-  assert.match(workflow, /Use @main only to test unreleased changes/);
-  assert.match(workflow, /uses: agentdiff-ai\/agentdiff@v0\.1\.0/);
+  assert.match(workflow, /Recommended v0 channel/);
+  assert.match(workflow, /Pin @v0\.1\.0 for an immutable exact version/);
+  assert.match(workflow, /uses: agentdiff-ai\/agentdiff@v0/);
   assert.match(workflow, /command: classify/);
   assert.match(workflow, /base: origin\/\$\{\{ github\.base_ref \}\}/);
   assert.match(workflow, /head: HEAD/);

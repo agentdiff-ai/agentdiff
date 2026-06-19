@@ -1156,10 +1156,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # Public prototype install. Use @main only to test unreleased changes.
+      # Recommended v0 channel. Pin @v0.1.0 for an immutable exact version.
       # For local development inside this repo, the equivalent command is:
       # node packages/cli/bin/agentdiff.js classify --base origin/\${{ github.base_ref }} --head HEAD
-      - uses: agentdiff-ai/agentdiff@v0.1.0
+      - uses: agentdiff-ai/agentdiff@v0
         with:
           command: classify
           base: origin/\${{ github.base_ref }}
