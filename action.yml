@@ -3,7 +3,7 @@ description: CI for AI agent behavior changes
 
 inputs:
   command:
-    description: "Command to run. Supported now: classify or demo."
+    description: "Command to run. Supported now: classify, run, or demo."
     required: false
     default: classify
   base:
@@ -16,6 +16,17 @@ inputs:
   files:
     description: "Comma-separated file list for classify mode. If set, base/head are ignored."
     required: false
+  example:
+    description: "Example name for run mode, such as coding-agent-harness."
+    required: false
+  recorded:
+    description: "Use recorded traces for run mode."
+    required: false
+    default: "false"
+  live:
+    description: "Use live harness adapter for run mode."
+    required: false
+    default: "false"
   out:
     description: "Output directory for report.json and report.md."
     required: false

@@ -33,6 +33,21 @@ function buildArgs(commandName, outDir) {
     return ["demo", "--out", outDir];
   }
 
+  if (commandName === "run") {
+    const example = input("example");
+    const args = ["run"];
+    if (example) args.push("--example", example);
+    if (truthyInput("recorded")) args.push("--recorded");
+    if (truthyInput("live")) args.push("--live");
+    args.push("--out", outDir);
+
+    if (!example && !truthyInput("live")) {
+      throw new Error("run mode needs example for action usage, e.g. example=coding-agent-harness.");
+    }
+
+    return args;
+  }
+
   if (commandName !== "classify") {
     throw new Error(`unsupported action command: ${commandName}`);
   }
@@ -61,6 +76,11 @@ function defaultBaseRef() {
 
 function input(name) {
   return process.env[`INPUT_${name.toUpperCase()}`]?.trim() || "";
+}
+
+function truthyInput(name) {
+  const value = input(name).toLowerCase();
+  return value === "true" || value === "1" || value === "yes";
 }
 
 function appendStepSummary(outDir) {

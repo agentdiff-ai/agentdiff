@@ -7,6 +7,7 @@ on:
 
 jobs:
   classify:
+    if: ${{ !contains(github.head_ref || '', 'coding-agent-edits-test') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,6 +23,32 @@ jobs:
           command: classify
           base: origin/${{ github.base_ref || 'main' }}
           head: HEAD
+          out: .agentdiff/runs/latest
+          github-token: ${{ github.token }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agentdiff-report
+          path: .agentdiff/runs/latest
+
+  recorded-harness:
+    if: ${{ contains(github.head_ref || '', 'coding-agent-edits-test') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./
+        with:
+          command: run
+          example: coding-agent-harness
+          recorded: "true"
           out: .agentdiff/runs/latest
           github-token: ${{ github.token }}
 
