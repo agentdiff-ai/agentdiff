@@ -284,6 +284,17 @@ npm run lab:agent-repos
 
 The lab clones public JS/TS agent repos into temp directories, runs agentdiff without installs or API keys, labels useful/noisy/missed findings, and writes `.agentdiff/agent-repo-lab/latest/report.md`. See [docs/agent-repo-lab.md](docs/agent-repo-lab.md).
 
+### Agent Repo Lab Evidence
+
+The latest secondary agent-repo lab tested agentdiff against 20 public JS/TS agent repos. It completed with 20/20 repos scanned, 0 crashes, 55 useful findings, 2 noisy findings, and 3/3 useful synthetic PR tests.
+
+This is product evidence, not a security audit, not a benchmark, and not a claim that external repos are unsafe. The goal is to keep agentdiff honest about first-run survivability, useful signal, noise, and missed agent surfaces on unfamiliar repos.
+
+Read the lab setup and latest summarized results:
+
+- [docs/agent-repo-lab.md](docs/agent-repo-lab.md)
+- [docs/lab-results.md](docs/lab-results.md)
+
 ## What Agentdiff Catches Today
 
 - Changed agent files in pull requests.

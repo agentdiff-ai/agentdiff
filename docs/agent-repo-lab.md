@@ -104,4 +104,6 @@ Read:
 .agentdiff/agent-repo-lab/latest/report.md
 ```
 
+The latest committed summary is in [lab-results.md](lab-results.md).
+
 Use the `candidate GitHub issues` section only for concrete product fixes with evidence from tested repos. Do not create vague issues or issues that accuse external maintainers of unsafe code.
