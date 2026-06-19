@@ -1,0 +1,15 @@
+{
+  "name": "agentdiff",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CI for agent behavior changes",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "agentdiff": "node packages/cli/bin/agentdiff.js",
+    "demo": "node packages/cli/bin/agentdiff.js demo",
+    "test": "node packages/cli/bin/agentdiff.js demo --out .agentdiff/runs/latest"
+  }
+}
