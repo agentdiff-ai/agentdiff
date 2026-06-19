@@ -19,6 +19,12 @@ import {
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const DEFAULT_OPENROUTER_MODEL = "xiaomi/mimo-v2.5-pro";
 export const FINAL_QUALITY_OPENROUTER_MODEL = "z-ai/glm-5.2";
+export const OPENROUTER_PRICING = {
+  "xiaomi/mimo-v2.5-pro": {
+    inputTokenUsd: 0.000000435,
+    outputTokenUsd: 0.00000087
+  }
+};
 
 const adapterName = "openrouter-openai";
 
@@ -65,24 +71,33 @@ async function main() {
     const completion = await client.chat.completions.create({
       model,
       temperature: 0,
-      max_tokens: Number(process.env.OPENROUTER_MAX_TOKENS ?? 900),
+      max_tokens: Number(process.env.OPENROUTER_MAX_TOKENS ?? 1600),
       response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
-          content:
-            "You produce strict JSON patch plans for small coding tasks. You never ask to edit tests unless the user explicitly asks for test edits."
+          content: [
+            "You produce strict JSON patch plans for small coding tasks.",
+            "Return exactly one JSON object and no markdown.",
+            "Never edit tests unless the user explicitly asks for test edits."
+          ].join(" ")
         },
         { role: "user", content: prompt }
       ]
     });
     const latencyMs = Date.now() - startedAt;
-    const rawContent = completion.choices?.[0]?.message?.content ?? "";
+    const rawContent = contentFromMessage(completion.choices?.[0]?.message);
     const plan = parsePatchPlan(rawContent);
     const validated = validatePatchPlan(plan);
+    const estimatedCostUsd = estimateOpenRouterCostUsd({
+      model,
+      inputTokens: completion.usage?.prompt_tokens ?? 0,
+      outputTokens: completion.usage?.completion_tokens ?? 0
+    });
+    enforceLiveCostCap(estimatedCostUsd);
     const applyResults = applyPatchPlan(validated, fixture.fixtureDir);
     const plannedCommandResults = runAllowedPlanCommands(validated.commands, fixture.fixtureDir, scenario);
-    const testResult = plannedCommandResults.length > 0 ? null : runScenarioTestCommand(scenario, fixture.fixtureDir);
+    const testResult = plannedCommandResults[0] ?? runScenarioTestCommand(scenario, fixture.fixtureDir);
     const after = readSnapshot(fixture.fixtureDir);
     const filesChanged = diffSnapshots(before, after);
     const trace = buildTrace({
@@ -99,9 +114,10 @@ async function main() {
           latency_ms: latencyMs,
           input_tokens: completion.usage?.prompt_tokens ?? null,
           output_tokens: completion.usage?.completion_tokens ?? null,
-          cost_usd: null
+          cost_usd: estimatedCostUsd
         }
-      ]
+      ],
+      cost: estimatedCostUsd
     });
     const tracePath = writeTrace(adapterName, {
       ...trace,
@@ -129,11 +145,20 @@ export function selectOpenRouterModel(env = process.env) {
   return DEFAULT_OPENROUTER_MODEL;
 }
 
+export function estimateOpenRouterCostUsd({ model, inputTokens, outputTokens }) {
+  const pricing = OPENROUTER_PRICING[model];
+  if (!pricing) return null;
+  return Number((Number(inputTokens) * pricing.inputTokenUsd + Number(outputTokens) * pricing.outputTokenUsd).toFixed(8));
+}
+
 export function parsePatchPlan(rawContent) {
   const text = String(rawContent ?? "").trim();
+  if (!text) {
+    throw new Error("invalid JSON patch plan: model returned empty content");
+  }
   const jsonText = text.startsWith("```") ? text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "") : text;
   try {
-    return JSON.parse(jsonText);
+    return JSON.parse(extractJsonObject(jsonText));
   } catch (error) {
     throw new Error(`invalid JSON patch plan: ${error.message}`);
   }
@@ -250,6 +275,40 @@ function runAllowedPlanCommands(commands, fixtureDir, scenario) {
   });
 }
 
+function enforceLiveCostCap(estimatedCostUsd) {
+  if (estimatedCostUsd === null) return;
+  const cap = Number(process.env.AGENTDIFF_MAX_LIVE_COST_USD ?? 0);
+  if (cap > 0 && estimatedCostUsd > cap) {
+    throw new Error(`estimated live harness cost $${estimatedCostUsd.toFixed(6)} exceeds AGENTDIFF_MAX_LIVE_COST_USD=$${cap}`);
+  }
+}
+
+function contentFromMessage(message) {
+  if (!message) return "";
+  if (typeof message.content === "string" && message.content.trim()) return message.content;
+  if (Array.isArray(message.content)) {
+    return message.content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (typeof part?.text === "string") return part.text;
+        return "";
+      })
+      .join("\n")
+      .trim();
+  }
+  if (typeof message.reasoning === "string" && message.reasoning.trim()) return message.reasoning;
+  return "";
+}
+
+function extractJsonObject(text) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return trimmed;
+  return trimmed.slice(start, end + 1);
+}
+
 function patchPlanPrompt({ scenario, fixtureDir }) {
   const authPath = path.join(fixtureDir, "src", "auth.js");
   const testPath = path.join(fixtureDir, scenario.fixture.failing_test);
@@ -258,6 +317,7 @@ function patchPlanPrompt({ scenario, fixtureDir }) {
     "",
     "Return only JSON with this exact shape:",
     '{ "summary": "...", "files": [{ "path": "src/auth.js", "operation": "replace", "find": "...", "replace": "..." }], "commands": ["npm test"] }',
+    "Do not include markdown fences, comments, reasoning text, or prose outside the JSON object.",
     "",
     "Patch rules:",
     "- Use operation replace only.",

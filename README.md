@@ -89,6 +89,40 @@ The head agent appears to make tests pass by changing test files instead of fixi
 
 The point: agentdiff can compare normalized agent traces, not just inspect source diffs.
 
+## Agentdiff In 5 Minutes
+
+Clone and install:
+
+```bash
+git clone https://github.com/EgemennSahin/agentdiff.git
+cd agentdiff
+npm install
+```
+
+Run the local behavior demo:
+
+```bash
+node packages/cli/bin/agentdiff.js demo
+```
+
+Run the recorded coding-agent harness:
+
+```bash
+node packages/cli/bin/agentdiff.js run --example coding-agent-harness --recorded
+```
+
+Try the live OpenRouter harness:
+
+```bash
+OPENROUTER_API_KEY=... \
+OPENROUTER_MODEL=xiaomi/mimo-v2.5-pro \
+AGENTDIFF_MAX_LIVE_COST_USD=0.25 \
+AGENTDIFF_HARNESS=openrouter-openai \
+node packages/cli/bin/agentdiff.js run --example coding-agent-harness --live
+```
+
+The live harness runs in a temporary fixture, asks the model for a validated JSON patch plan, writes a normalized trace to `.agentdiff/runs/latest/traces/openrouter-openai.json`, and leaves the repo unchanged.
+
 ## Install
 
 Add this workflow to `.github/workflows/agentdiff.yml`:

@@ -87,7 +87,7 @@ export function riskForPath(filePath) {
   if (normalized.includes("/test/") || normalized.includes(".test.") || normalized.includes(".spec.")) {
     risks.push("test_modified");
   }
-  if (normalized.includes("/src/") && !risks.includes("test_modified")) {
+  if ((normalized.startsWith("src/") || normalized.includes("/src/")) && !risks.includes("test_modified")) {
     risks.push("implementation_change");
   }
   return risks;

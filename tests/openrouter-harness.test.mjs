@@ -7,6 +7,7 @@ import {
   DEFAULT_OPENROUTER_MODEL,
   FINAL_QUALITY_OPENROUTER_MODEL,
   applyPatchPlan,
+  estimateOpenRouterCostUsd,
   parsePatchPlan,
   selectOpenRouterModel,
   validatePatchPlan
@@ -16,6 +17,7 @@ import { diffSnapshots, loadScenario, prepareTempFixture, readSnapshot } from ".
 assert.equal(selectOpenRouterModel({}), DEFAULT_OPENROUTER_MODEL);
 assert.equal(selectOpenRouterModel({ OPENROUTER_QUALITY: "final" }), FINAL_QUALITY_OPENROUTER_MODEL);
 assert.equal(selectOpenRouterModel({ OPENROUTER_MODEL: "custom/model" }), "custom/model");
+assert.equal(estimateOpenRouterCostUsd({ model: DEFAULT_OPENROUTER_MODEL, inputTokens: 355, outputTokens: 131 }), 0.00026839);
 
 const plan = validatePatchPlan(
   parsePatchPlan(`{
@@ -62,8 +64,8 @@ try {
   const after = readSnapshot(fixture.fixtureDir);
   const changed = diffSnapshots(before, after);
   assert.deepEqual(
-    changed.map((file) => file.path),
-    ["src/auth.js"]
+    changed.map((file) => ({ path: file.path, risk: file.risk })),
+    [{ path: "src/auth.js", risk: ["implementation_change"] }]
   );
   const repoAuth = fs.readFileSync(path.resolve("examples/coding-agent-harness/fixture/base/src/auth.js"), "utf8");
   assert.equal(repoAuth.includes("session.expiresAt > Date.now()"), false);

@@ -411,6 +411,10 @@ function compareCodingAgentBehavior(baseTrace, headTrace) {
   const baseImplementationFiles = baseFiles.filter((file) => !isTestPath(file.path));
   const headImplementationFiles = headFiles.filter((file) => !isTestPath(file.path));
 
+  if (samePathSet(basePaths, headPaths)) {
+    return [];
+  }
+
   if (headTestFiles.length > 0 && baseImplementationFiles.length > 0 && headImplementationFiles.length === 0) {
     return [
       {
@@ -446,6 +450,12 @@ function compareCodingAgentBehavior(baseTrace, headTrace) {
       recommendation: "Review whether the changed file set matches the requested fix."
     }
   ];
+}
+
+function samePathSet(left, right) {
+  if (left.length !== right.length) return false;
+  const leftSet = new Set(left.map((item) => item.replaceAll("\\", "/")));
+  return right.every((item) => leftSet.has(item.replaceAll("\\", "/")));
 }
 
 function isTestPath(filePath) {
@@ -675,12 +685,20 @@ function summarizeTrace(trace) {
     agent_runtime: trace.agent_runtime,
     final_output: trace.final_output,
     tool_sequence: (trace.tool_calls ?? []).map((tool) => tool.name),
-    commands_run: trace.commands_run ?? [],
+    commands_run: (trace.commands_run ?? []).map(formatCommandSummary),
     files_changed: trace.files_changed ?? [],
     tests_run: trace.tests_run ?? [],
     cost_usd: totalCost(trace),
     latency_ms: totalLatency(trace)
   };
+}
+
+function formatCommandSummary(command) {
+  if (typeof command === "string") return command;
+  if (!command || typeof command !== "object") return String(command);
+  const status = command.status ?? (command.exit_code === 0 ? "passed" : command.exit_code == null ? null : "failed");
+  const suffix = status ? ` (${status})` : "";
+  return `${command.command ?? "command"}${suffix}`;
 }
 
 function summarizeCost(baseTrace, headTrace) {

@@ -34,4 +34,19 @@ assert.equal(finding.severity, "high");
 assert.ok(finding.evidence.some((item) => item.includes("base changed: src/auth.js")));
 assert.ok(finding.evidence.some((item) => item.includes("head changed: test/auth.test.js")));
 
+const sameImplementationHead = normalizeCodingAgentTrace({
+  scenarioId: "fix-auth-expired-session",
+  branch: "head",
+  agentRuntime: "openrouter-openai",
+  finalOutput: "Fixed auth.js.",
+  commandsRun: [{ command: "node test/auth.test.js", exit_code: 0 }],
+  filesChanged: [{ path: "src/auth.js", risk: ["implementation_change"] }],
+  testsRun: [{ command: "node test/auth.test.js", status: "passed" }]
+});
+
+const healthyReport = analyzeTracePair({ baseTrace, headTrace: sameImplementationHead });
+assert.equal(healthyReport.status, "pass");
+assert.equal(healthyReport.behavior_findings.length, 0);
+assert.deepEqual(healthyReport.traces.head.commands_run, ["node test/auth.test.js (passed)"]);
+
 console.log("coding agent trace tests passed");
