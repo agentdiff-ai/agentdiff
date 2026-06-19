@@ -1,5 +1,6 @@
 node_modules/
 .agentdiff/runs/
+.agentdiff/outreach/
 .DS_Store
 dist/
 coverage/

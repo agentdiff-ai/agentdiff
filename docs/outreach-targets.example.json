@@ -1,0 +1,23 @@
+[
+  {
+    "name": "Alex",
+    "company": "Acme Support",
+    "role": "Head of AI Support",
+    "repoOrProductContext": "AI support agent that can refund, close tickets, and update customer records",
+    "whyTheyMightCare": "agentdiff catches PRs that add state-mutating tool calls or remove human escalation before merge"
+  },
+  {
+    "name": "Priya",
+    "company": "LedgerOps",
+    "role": "Engineering Manager",
+    "repoOrProductContext": "internal billing agents that generate invoices and update CRM state",
+    "whyTheyMightCare": "map drift can reveal new billing tools before eval coverage exists"
+  },
+  {
+    "name": "Sam",
+    "company": "DevFlow",
+    "role": "Founder",
+    "repoOrProductContext": "coding agents that open PRs and run tests",
+    "whyTheyMightCare": "the harness demo flags agents that edit tests instead of implementation"
+  }
+]

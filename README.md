@@ -186,6 +186,14 @@ node packages/cli/bin/agentdiff.js operator
 
 The operator is dry-run by default. `--execute` is limited to the allowlist in `agentdiff.operator.yml`; it will not push to main, send outreach, publish packages, change repo visibility, or spend above the configured model-credit cap without explicit approval.
 
+Generate approval-gated outreach drafts:
+
+```bash
+node scripts/outreach/draft.js docs/outreach-targets.example.json
+```
+
+Drafts are saved to `.agentdiff/outreach/drafts.md`. Nothing is sent automatically.
+
 ## What Agentdiff Catches Today
 
 - Changed agent files in pull requests.
