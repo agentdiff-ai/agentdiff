@@ -12,7 +12,7 @@ The goal is qualitative: understand whether reachable high-risk findings are use
 | `mastra-ai/mastra` | SDK agent implementations and browser-agent tools | useful but mixed | tests and helper utilities can be promoted too strongly |
 | `vercel-labs/github-tools` | chat API routes creating GitHub agents and durable workflows | useful but mixed | docs config and UI metadata can look agent-like from copy and names |
 | `langchain-ai/langgraphjs` | runnable examples for SQL agents, HITL agents, streaming APIs, and checkpointing | useful but noisy | examples/docs/tests/framework internals need clearer categories |
-| `langchain-ai/memory-agent-js` | memory tool detected, but not reachable | unclear | `.js` import specifiers pointing at `.ts` files and LangGraph config are not resolved yet |
+| `langchain-ai/memory-agent-js` | LangGraph graph entrypoint reaches memory mutation tool | useful | scenario suggestions should now turn this evidence into a concrete memory-write scenario |
 
 ## Representative Findings
 
@@ -178,16 +178,16 @@ Unreachable `.claude/skills/**` and `.agents/skills/**` files were also flagged 
 
 `src/memory_agent/tools.ts`
 
-- Detected as a high-risk tool implementation, but not reachable.
+- Detected as a reachable high-risk tool implementation.
 - Why it might matter: the tool writes memories via a store and can update existing memories.
-- Quality read: likely useful, but agentdiff currently lacks enough reachability evidence.
-- Stronger evidence would resolve TypeScript source files imported with `.js` specifiers.
+- Quality read: useful.
+- Evidence now includes reachability from `src/memory_agent/graph.ts`, imported-by evidence from `graph.ts`, and `./tools.js` resolving to `tools.ts`.
 
 `src/memory_agent/graph.ts`
 
 - This file is referenced by `langgraph.json`, imports `./tools.js`, and initializes/binds tools.
-- Quality read: missed as a reachable high-risk path in the current bakeoff.
-- Stronger evidence would parse LangGraph config entrypoints and resolve `.js` specifiers to `.ts` files.
+- Quality read: useful.
+- Agentdiff now treats the graph file as a LangGraph entrypoint and records `entrypoint_source: "langgraph.json"` with graph name `agent`.
 
 `README.md` and `package.json`
 
@@ -213,11 +213,11 @@ Unreachable `.claude/skills/**` and `.agents/skills/**` files were also flagged 
 
 ## Next Precision Improvements
 
-1. Resolve TypeScript source files imported with `.js` specifiers.
-2. Parse framework config entrypoints such as `langgraph.json`.
-3. Mark or ignore type-only imports when computing behavior reachability.
-4. Further split surface types for docs, tests, config, persistence, browser tools, and runtime agent entrypoints.
-5. Continue reducing broad high-risk verbs such as `create` unless supported by stronger context.
+1. Mark or ignore type-only imports when computing behavior reachability.
+2. Parse richer framework config entrypoint shapes beyond simple LangGraph string definitions.
+3. Further split surface types for docs, tests, config, persistence, browser tools, and runtime agent entrypoints.
+4. Continue reducing broad high-risk verbs such as `create` unless supported by stronger context.
+5. Generate deterministic scenario suggestions for reachable high-risk surfaces.
 
 Completed since this review:
 
@@ -225,7 +225,9 @@ Completed since this review:
 - `agentdiff.yml` suppressions now support path globs with reason/expiration and visible suppressed findings.
 - Docs/tests/config categories are downranked unless supported by stronger reachability evidence.
 - `create*` names no longer imply high risk without stronger mutation context.
+- Runtime JS specifiers such as `./tools.js` now resolve to TypeScript source files such as `tools.ts`.
+- Simple LangGraph `langgraph.json` graph definitions now seed entrypoints.
 
 ## Product Read
 
-The bakeoff supports the current direction: import graph reachability makes the scanner more useful than path/name heuristics alone. The next useful product work is targeted precision, especially `.js` specifier to `.ts` source resolution and framework config entrypoints.
+The bakeoff supports the current direction: import graph reachability makes the scanner more useful than path/name heuristics alone. The next useful product work is deterministic scenario suggestions from reachable high-risk surfaces.

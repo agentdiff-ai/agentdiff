@@ -24,8 +24,8 @@ Latest run: June 19, 2026 on Windows, Node `v22.11.0`.
 
 | repo | scan status | reachable high-risk surfaces | likely false positives | crash? | useful signal? |
 | --- | --- | ---: | ---: | --- | --- |
-| `langchain-ai/memory-agent-js` | passed | 0 | 4 | no | unclear |
-| `langchain-ai/agents-from-scratch-ts` | passed | 3 | 5 | no | yes |
+| `langchain-ai/memory-agent-js` | passed | 2 | 4 | no | yes |
+| `langchain-ai/agents-from-scratch-ts` | passed | 9 | 5 | no | yes |
 | `mastra-ai/mastra` | passed, partial | 12 | 8 | no | yes |
 | `vercel-labs/github-tools` | passed | 3 | 8 | no | yes |
 | `langchain-ai/langgraphjs` | passed | 12 | 8 | no | yes |
@@ -42,7 +42,7 @@ Latest run: June 19, 2026 on Windows, Node `v22.11.0`.
 - This is not a claim that any scanned project has a vulnerability.
 - This is not a full static analysis benchmark.
 - This does not evaluate model output quality.
-- This uses best-effort package import and `tsconfig` path alias resolution, not full TypeScript compiler resolution.
+- This uses best-effort package import, `tsconfig` path alias, JS-to-TS source fallback, and simple LangGraph config resolution, not full TypeScript compiler or framework resolution.
 
 ## What Changed Because Of The Bakeoff
 
@@ -57,6 +57,8 @@ Fixes added:
 - Generated/heavy directory skips for folders like `node_modules`, `dist`, `build`, `.next`, `.turbo`, `.cache`, `vendor`, and `generated`.
 - Partial maps with scan-limit warnings instead of hard failures.
 - JS/TS import graph scanning for relative imports, `tsconfig`/`jsconfig` path aliases, and workspace package imports.
+- JS runtime specifier fallback to TypeScript source files, for example `./tools.js` to `tools.ts`.
+- Simple LangGraph `langgraph.json` graph entrypoints.
 - Reachable vs unreachable surface separation in maps and stranger-test reports.
 - Finding explanations and path-glob suppressions with reason/expiration audit visibility.
 
@@ -64,7 +66,7 @@ Fixes added:
 
 - Import graph reachability makes the report more useful than path/name heuristics alone.
 - Broad heuristics still produce noise, especially in documentation and skill directories.
-- Complex package exports, package-manager-specific resolution, advanced TypeScript path behavior, and framework config entrypoints remain precision gaps.
+- Complex package exports, package-manager-specific resolution, advanced TypeScript path behavior, and richer framework config shapes remain precision gaps.
 - The current scanner is useful for repo-awareness, not for proving runtime behavior by itself.
 
 ## Current Command

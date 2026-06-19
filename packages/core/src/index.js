@@ -45,7 +45,7 @@ const IGNORED_CALLS = new Set([
   "log"
 ]);
 
-const JS_TS_EXTENSIONS = [".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"];
+const JS_TS_EXTENSIONS = [".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
 
 export function readJson(path) {
   return JSON.parse(fs.readFileSync(path, "utf8"));
@@ -217,20 +217,22 @@ export function extractCallsFromUnifiedDiff(diffText = "") {
   };
 }
 
-export function buildAgentMap({ files, repo = process.cwd(), entrypointGlobs = [], importResolver = {} }) {
+export function buildAgentMap({ files, repo = process.cwd(), entrypointGlobs = [], entrypointSources = {}, importResolver = {} }) {
   const fileRecords = files.map((file) => ({
     filePath: normalizePath(file.filePath),
     content: file.content ?? ""
   }));
+  const normalizedEntrypointSources = normalizeEntrypointSources(entrypointSources);
   const importGraph = buildImportGraph(fileRecords, importResolver);
   const initialSurfaces = fileRecords
     .map((file) => classifyChangedFile(file))
-    .map((surface) => applyConfiguredEntrypoint(surface, entrypointGlobs));
+    .map((surface) => applyConfiguredEntrypoint(surface, entrypointGlobs, normalizedEntrypointSources));
   const entrypoints = resolveGraphEntrypoints({ surfaces: initialSurfaces, files: fileRecords, entrypointGlobs });
   const reachability = computeReachability(importGraph.edges, entrypoints);
   const importedBy = buildImportedBy(importGraph.edges);
 
   importGraph.entrypoints = entrypoints;
+  importGraph.entrypoint_sources = normalizedEntrypointSources;
   importGraph.reachable_files = [...reachability.reachableFiles].sort();
 
   const surfaces = initialSurfaces
@@ -923,15 +925,29 @@ function fileExtension(filePath) {
   return index === -1 ? "" : name.slice(index).toLowerCase();
 }
 
-function applyConfiguredEntrypoint(surface, entrypointGlobs) {
+function normalizeEntrypointSources(entrypointSources = {}) {
+  return Object.fromEntries(
+    Object.entries(entrypointSources).map(([filePath, metadata]) => [normalizePath(filePath), metadata])
+  );
+}
+
+function applyConfiguredEntrypoint(surface, entrypointGlobs, entrypointSources = {}) {
   if (!matchesEntrypointGlob(surface.path, entrypointGlobs)) return surface;
-  const evidence = [...surface.evidence, "configured agentdiff.yml entrypoint"];
+  const source = entrypointSources[normalizePath(surface.path)];
+  const evidence = [...surface.evidence];
+  if (source?.entrypoint_source === "langgraph.json") {
+    evidence.push(`LangGraph graph entrypoint from langgraph.json: ${source.graph_name}`);
+  } else {
+    evidence.push("configured agentdiff.yml entrypoint");
+  }
   return {
     ...surface,
     label: surface.label === "not_agent_related" ? "agent_entrypoint" : surface.label,
     confidence: Math.max(surface.confidence, 0.84),
     evidence: unique(evidence),
-    configured_entrypoint: true
+    configured_entrypoint: true,
+    entrypoint_source: source?.entrypoint_source ?? "agentdiff.yml",
+    graph_name: source?.graph_name
   };
 }
 
@@ -1142,11 +1158,29 @@ function resolvePathCandidate(rawPath, fileSet) {
   if (!isSafeRepoPath(raw)) return null;
   const candidates = [];
 
-  candidates.push(raw);
-  for (const ext of JS_TS_EXTENSIONS) candidates.push(`${raw}${ext}`);
-  for (const ext of JS_TS_EXTENSIONS) candidates.push(`${raw}/index${ext}`);
+  candidates.push({ path: raw });
+  for (const replacement of runtimeSpecifierSourceFallbacks(raw)) candidates.push(replacement);
+  for (const ext of JS_TS_EXTENSIONS) candidates.push({ path: `${raw}${ext}` });
+  for (const ext of JS_TS_EXTENSIONS) candidates.push({ path: `${raw}/index${ext}` });
 
-  return candidates.find((candidate) => fileSet.has(candidate)) ?? null;
+  return candidates.find((candidate) => fileSet.has(candidate.path)) ?? null;
+}
+
+function runtimeSpecifierSourceFallbacks(rawPath) {
+  const ext = fileExtension(rawPath);
+  const replacements = {
+    ".js": [".ts", ".tsx", ".mts", ".cts"],
+    ".mjs": [".mts"],
+    ".cjs": [".cts"]
+  }[ext];
+  if (!replacements) return [];
+  const withoutExt = rawPath.slice(0, -ext.length);
+  return replacements.map((replacementExt) => ({
+    path: `${withoutExt}${replacementExt}`,
+    specifier_ext: ext,
+    resolved_source_ext: replacementExt,
+    note: "resolved JS runtime specifier to TS source"
+  }));
 }
 
 function isSafeRepoPath(filePath) {
@@ -1215,9 +1249,12 @@ function resolveImportReference({ fromPath, importRef, fileSet, resolver }) {
     const resolved = resolveRelativeImport(fromPath, specifier, fileSet);
     if (!resolved) return null;
     return {
-      to: resolved,
+      to: resolved.path,
       resolved_via: "relative",
-      evidence: [`relative import: ${specifier}`]
+      specifier_ext: resolved.specifier_ext,
+      resolved_source_ext: resolved.resolved_source_ext,
+      note: resolved.note,
+      evidence: [`relative import: ${specifier}`, resolved.note].filter(Boolean)
     };
   }
 
@@ -1237,7 +1274,7 @@ function resolveTsconfigPathImport(specifier, tsconfigPaths, fileSet) {
       const resolved = resolvePathCandidate(rawTarget, fileSet);
       if (!resolved) continue;
       return {
-        to: resolved,
+        to: resolved.path,
         resolved_via: "tsconfig_paths",
         alias_pattern: entry.aliasPattern,
         target_pattern: targetPattern,
@@ -1285,7 +1322,7 @@ function resolveWorkspacePackageImport(specifier, workspacePackages, fileSet) {
       const resolved = resolvePathCandidate(candidate, fileSet);
       if (!resolved) continue;
       return {
-        to: resolved,
+        to: resolved.path,
         resolved_via: "workspace_package",
         package_name: workspacePackage.packageName,
         package_root: workspacePackage.packageRoot,
@@ -1371,6 +1408,9 @@ export function buildImportGraph(files, importResolver = {}) {
         to: resolved.to,
         import_statement: importRef.statement,
         resolved_via: resolved.resolved_via,
+        specifier_ext: resolved.specifier_ext,
+        resolved_source_ext: resolved.resolved_source_ext,
+        note: resolved.note,
         alias_pattern: resolved.alias_pattern,
         target_pattern: resolved.target_pattern,
         package_name: resolved.package_name,

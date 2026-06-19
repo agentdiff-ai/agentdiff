@@ -261,6 +261,8 @@ Read the public repo bakeoff summary: [docs/bakeoff.md](docs/bakeoff.md).
 - Recorded coding-agent traces where the agent edits tests instead of implementation.
 - Tool files under `/tools/`.
 - JS/TS import graph reachability from agent entrypoints, including relative imports, `tsconfig`/`jsconfig` path aliases, and workspace package imports.
+- Runtime `.js`/`.mjs`/`.cjs` specifiers that point at TypeScript source files such as `.ts`, `.mts`, and `.cts`.
+- Best-effort LangGraph `langgraph.json` graph entrypoints.
 - State-mutating and external-side-effect risk using path, function name, argument, and diff heuristics.
 - Suppressed intentional findings with reason/expiration audit visibility.
 
@@ -273,6 +275,7 @@ Read the public repo bakeoff summary: [docs/bakeoff.md](docs/bakeoff.md).
 - No production trace ingestion.
 - No broad framework integration.
 - No full TypeScript compiler resolution; `tsconfig` aliases and workspace imports are best-effort.
+- No full LangGraph config support; only simple string graph definitions are parsed today.
 - No live behavior harness execution in PRs yet.
 - No LLM judge or generic eval generation.
 - No complex suppression expression language; suppressions are path globs only.

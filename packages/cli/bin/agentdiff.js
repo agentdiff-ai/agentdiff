@@ -153,11 +153,16 @@ async function classify({ files, out }) {
 async function scan({ root, out }) {
   const rootDir = path.resolve(process.cwd(), root);
   const scanResult = collectScanFiles(rootDir);
-  const entrypointGlobs = readEntrypointGlobs(rootDir).map((glob) => resolveGlobRelativeToCwd(rootDir, glob));
+  const langGraphConfig = readLangGraphEntrypoints(rootDir);
+  const entrypointGlobs = [
+    ...readEntrypointGlobs(rootDir).map((glob) => resolveGlobRelativeToCwd(rootDir, glob)),
+    ...langGraphConfig.entrypoints
+  ];
   const importResolver = buildImportResolverConfig(rootDir);
   const map = buildAgentMap({
     repo: path.basename(process.cwd()),
     entrypointGlobs,
+    entrypointSources: langGraphConfig.entrypointSources,
     importResolver,
     files: scanResult.files.map((file) => ({
       filePath: file.relativePath,
@@ -166,7 +171,9 @@ async function scan({ root, out }) {
   });
   map.scan = {
     ...scanResult.stats,
+    scan_limit_warnings: [...new Set([...scanResult.stats.scan_limit_warnings, ...langGraphConfig.warnings])],
     entrypoints_found: map.import_graph.entrypoints.length,
+    langgraph_entrypoints: langGraphConfig.entrypoints.length,
     import_edges: map.import_graph.edges.length,
     reachable_files: map.import_graph.reachable_files.length,
     alias_imports_resolved: map.import_graph.alias_imports_resolved,
@@ -189,6 +196,7 @@ async function scan({ root, out }) {
     }
   }
   console.log(`entrypoints found: ${map.scan.entrypoints_found}`);
+  console.log(`LangGraph entrypoints found: ${map.scan.langgraph_entrypoints}`);
   console.log(`import edges: ${map.scan.import_edges}`);
   console.log(`reachable files: ${map.scan.reachable_files}`);
   console.log(`alias imports resolved: ${map.scan.alias_imports_resolved}`);
@@ -359,7 +367,7 @@ function collectScanFiles(rootDir) {
     "tmp",
     "vendor"
   ]);
-  const allowedExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json", ".md", ".mdx", ".txt", ".yml", ".yaml"]);
+  const allowedExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts", ".json", ".md", ".mdx", ".txt", ".yml", ".yaml"]);
   const files = [];
   const skipped = new Map();
   const warnings = [];
@@ -634,6 +642,60 @@ function readSuppressionRules(rootDir) {
 
   finishCurrent();
   return suppressions.filter((item) => item.path);
+}
+
+function readLangGraphEntrypoints(rootDir) {
+  const configPath = path.join(rootDir, "langgraph.json");
+  const result = {
+    entrypoints: [],
+    entrypointSources: {},
+    warnings: []
+  };
+  if (!fs.existsSync(configPath)) return result;
+
+  let config;
+  try {
+    config = JSON.parse(stripJsonComments(fs.readFileSync(configPath, "utf8")));
+  } catch (error) {
+    result.warnings.push(`LangGraph config warning: could not parse langgraph.json (${error.message})`);
+    return result;
+  }
+
+  if (!config.graphs || typeof config.graphs !== "object" || Array.isArray(config.graphs)) {
+    result.warnings.push("LangGraph config warning: langgraph.json has no object graphs field");
+    return result;
+  }
+
+  for (const [graphName, graphDefinition] of Object.entries(config.graphs)) {
+    if (typeof graphDefinition !== "string") {
+      result.warnings.push(`LangGraph config warning: graph ${graphName} is not a string definition`);
+      continue;
+    }
+    const graphFile = graphDefinition.split(":")[0]?.trim();
+    if (!graphFile) {
+      result.warnings.push(`LangGraph config warning: graph ${graphName} has no file path`);
+      continue;
+    }
+    const absolutePath = path.resolve(rootDir, graphFile);
+    if (!isPathInside(rootDir, absolutePath)) {
+      result.warnings.push(`LangGraph config warning: graph ${graphName} points outside scan root`);
+      continue;
+    }
+    const relativePath = path.relative(process.cwd(), absolutePath).replaceAll("\\", "/");
+    result.entrypoints.push(relativePath);
+    result.entrypointSources[relativePath] = {
+      entrypoint_source: "langgraph.json",
+      graph_name: graphName
+    };
+  }
+
+  result.entrypoints = [...new Set(result.entrypoints)].sort();
+  return result;
+}
+
+function isPathInside(rootDir, candidatePath) {
+  const relative = path.relative(rootDir, candidatePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function findAgentdiffConfigPath(rootDir) {

@@ -208,6 +208,77 @@ const reachableCharge = aliasWorkspaceMap.surfaces.find((surface) => surface.pat
 assert.ok(reachableCharge);
 assert.equal(reachableCharge.reachable_from_entrypoint, true);
 
+const runtimeSpecifierMap = buildAgentMap({
+  repo: "fixture",
+  entrypointGlobs: [
+    "app/graph.ts",
+    "app/index-user.ts",
+    "app/mjs-user.ts",
+    "app/cjs-user.ts",
+    "app/exact-user.ts"
+  ],
+  files: [
+    {
+      filePath: "app/graph.ts",
+      content: `import { initializeTools } from "./tools.js"; export const graph = initializeTools();`
+    },
+    {
+      filePath: "app/tools.ts",
+      content: `export function initializeTools() { return []; }`
+    },
+    {
+      filePath: "app/index-user.ts",
+      content: `import { value } from "./index.js"; export const output = value;`
+    },
+    {
+      filePath: "app/index.ts",
+      content: `export const value = true;`
+    },
+    {
+      filePath: "app/mjs-user.ts",
+      content: `import { runner } from "./runner.mjs"; export const output = runner;`
+    },
+    {
+      filePath: "app/runner.mts",
+      content: `export const runner = true;`
+    },
+    {
+      filePath: "app/cjs-user.ts",
+      content: `const legacy = require("./legacy.cjs"); export const output = legacy;`
+    },
+    {
+      filePath: "app/legacy.cts",
+      content: `export const legacy = true;`
+    },
+    {
+      filePath: "app/exact-user.ts",
+      content: `import { exact } from "./exact.js"; export const output = exact;`
+    },
+    {
+      filePath: "app/exact.js",
+      content: `export const exact = "js";`
+    },
+    {
+      filePath: "app/exact.ts",
+      content: `export const exact = "ts";`
+    }
+  ]
+});
+
+const runtimeEdges = runtimeSpecifierMap.import_graph.edges;
+const toolsFallbackEdge = runtimeEdges.find((edge) => edge.from === "app/graph.ts" && edge.to === "app/tools.ts");
+assert.ok(toolsFallbackEdge);
+assert.equal(toolsFallbackEdge.resolved_via, "relative");
+assert.equal(toolsFallbackEdge.specifier_ext, ".js");
+assert.equal(toolsFallbackEdge.resolved_source_ext, ".ts");
+assert.equal(toolsFallbackEdge.note, "resolved JS runtime specifier to TS source");
+assert.ok(runtimeEdges.some((edge) => edge.from === "app/index-user.ts" && edge.to === "app/index.ts" && edge.resolved_source_ext === ".ts"));
+assert.ok(runtimeEdges.some((edge) => edge.from === "app/mjs-user.ts" && edge.to === "app/runner.mts" && edge.resolved_source_ext === ".mts"));
+assert.ok(runtimeEdges.some((edge) => edge.from === "app/cjs-user.ts" && edge.to === "app/legacy.cts" && edge.resolved_source_ext === ".cts"));
+const exactEdge = runtimeEdges.find((edge) => edge.from === "app/exact-user.ts");
+assert.equal(exactEdge.to, "app/exact.js");
+assert.equal(exactEdge.resolved_source_ext, undefined);
+
 const repoRoot = process.cwd();
 const cli = path.join(repoRoot, "packages", "cli", "bin", "agentdiff.js");
 const scanFixtureRoot = path.join(repoRoot, "tmp-import-graph-fixture");
@@ -287,6 +358,81 @@ export async function supportAgent() {
   assert.ok(scanMap.import_graph.edges.some((edge) => edge.resolved_via === "workspace_package" && edge.package_name === "@repo/agent"));
 } finally {
   fs.rmSync(scanFixtureRoot, { recursive: true, force: true });
+}
+
+const langGraphFixtureRoot = path.join(repoRoot, "tmp-langgraph-fixture");
+
+try {
+  fs.rmSync(langGraphFixtureRoot, { recursive: true, force: true });
+  fs.mkdirSync(path.join(langGraphFixtureRoot, "src", "memory_agent"), { recursive: true });
+  fs.writeFileSync(
+    path.join(langGraphFixtureRoot, "langgraph.json"),
+    JSON.stringify({ graphs: { agent: "./src/memory_agent/graph.ts:graph" } }, null, 2)
+  );
+  fs.writeFileSync(
+    path.join(langGraphFixtureRoot, "src", "memory_agent", "graph.ts"),
+    `
+import { initializeTools } from "./tools.js";
+export const graph = initializeTools();
+`
+  );
+  fs.writeFileSync(
+    path.join(langGraphFixtureRoot, "src", "memory_agent", "tools.ts"),
+    `
+export function initializeTools() {
+  return [async function upsertMemory(content, memoryId) {
+    return { content, memoryId };
+  }];
+}
+`
+  );
+
+  const outPath = path.join(langGraphFixtureRoot, ".agentdiff", "map.json");
+  const result = spawnSync(process.execPath, [cli, "scan", "--root", langGraphFixtureRoot, "--out", outPath], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /LangGraph entrypoints found: 1/);
+
+  const langGraphMap = JSON.parse(fs.readFileSync(outPath, "utf8"));
+  assert.equal(langGraphMap.scan.langgraph_entrypoints, 1);
+  assert.equal(langGraphMap.import_graph.entrypoints.includes("tmp-langgraph-fixture/src/memory_agent/graph.ts"), true);
+  assert.deepEqual(langGraphMap.import_graph.entrypoint_sources["tmp-langgraph-fixture/src/memory_agent/graph.ts"], {
+    entrypoint_source: "langgraph.json",
+    graph_name: "agent"
+  });
+  const langGraphEdge = langGraphMap.import_graph.edges.find((edge) => edge.to === "tmp-langgraph-fixture/src/memory_agent/tools.ts");
+  assert.ok(langGraphEdge);
+  assert.equal(langGraphEdge.specifier_ext, ".js");
+  assert.equal(langGraphEdge.resolved_source_ext, ".ts");
+  const memoryTool = langGraphMap.surfaces.find((surface) => surface.path === "tmp-langgraph-fixture/src/memory_agent/tools.ts");
+  assert.ok(memoryTool);
+  assert.equal(memoryTool.reachable_from_entrypoint, true);
+  assert.ok(memoryTool.evidence.some((item) => item.includes("reachable from entrypoint")));
+} finally {
+  fs.rmSync(langGraphFixtureRoot, { recursive: true, force: true });
+}
+
+const malformedLangGraphRoot = path.join(repoRoot, "tmp-langgraph-malformed");
+
+try {
+  fs.rmSync(malformedLangGraphRoot, { recursive: true, force: true });
+  fs.mkdirSync(malformedLangGraphRoot, { recursive: true });
+  fs.writeFileSync(path.join(malformedLangGraphRoot, "langgraph.json"), "{ invalid json");
+
+  const outPath = path.join(malformedLangGraphRoot, ".agentdiff", "map.json");
+  const result = spawnSync(process.execPath, [cli, "scan", "--root", malformedLangGraphRoot, "--out", outPath], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /LangGraph config warning: could not parse langgraph\.json/);
+  assert.ok(fs.existsSync(outPath));
+} finally {
+  fs.rmSync(malformedLangGraphRoot, { recursive: true, force: true });
 }
 
 console.log("import graph tests passed");
