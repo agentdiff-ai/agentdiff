@@ -65,7 +65,7 @@ async function main() {
 }
 
 function runSelfTest() {
-  const origin = readGitOutput(["remote", "get-url", "origin"]) || "https://github.com/EgemennSahin/agentdiff.git";
+  const origin = readGitOutput(["remote", "get-url", "origin"]) || "https://github.com/agentdiff-ai/agentdiff.git";
   const cloneDir = path.join(runRoot, "self", "agentdiff");
   const results = [];
 

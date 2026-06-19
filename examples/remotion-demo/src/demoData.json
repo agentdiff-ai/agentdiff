@@ -2,7 +2,7 @@
   "title": "agentdiff: ci for ai agent behavior changes",
   "tagline": "normal ci says the code runs. agentdiff says whether agent behavior got riskier.",
   "durationSeconds": 75,
-  "installSnippet": "uses: EgemennSahin/agentdiff@main\\nwith:\\n  command: classify\\n  base: origin/${{ github.base_ref }}\\n  head: HEAD\\n  github-token: ${{ github.token }}",
+  "installSnippet": "uses: agentdiff-ai/agentdiff@main\\nwith:\\n  command: classify\\n  base: origin/${{ github.base_ref }}\\n  head: HEAD\\n  github-token: ${{ github.token }}",
   "scenes": [
     {
       "kicker": "Normal CI",

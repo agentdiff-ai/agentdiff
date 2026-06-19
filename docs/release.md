@@ -3,13 +3,13 @@
 Agentdiff is currently an early prototype. Prototype installs use:
 
 ```yaml
-uses: EgemennSahin/agentdiff@main
+uses: agentdiff-ai/agentdiff@main
 ```
 
 Stable installs should use a release tag once available:
 
 ```yaml
-uses: EgemennSahin/agentdiff@v0
+uses: agentdiff-ai/agentdiff@v0
 ```
 
 Do not publish to npm or create a git tag until the release owner explicitly decides to cut the release.

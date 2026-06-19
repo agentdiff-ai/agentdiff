@@ -18,7 +18,7 @@ Shows:
 - head issues a refund and closes the ticket
 - agentdiff flags risky behavior change from normalized traces
 
-Live PR: [Demo: unsafe support refund behavior](https://github.com/EgemennSahin/agentdiff/pull/1)
+Live PR: [Demo: unsafe support refund behavior](https://github.com/agentdiff-ai/agentdiff/pull/1)
 
 ## Map Drift Demo
 
@@ -30,7 +30,7 @@ Shows:
 - a PR adds `src/tools/sendInvoice.js`
 - agentdiff flags a new unmapped high-risk tool
 
-Live PR: [Demo: new unmapped billing tool](https://github.com/EgemennSahin/agentdiff/pull/2)
+Live PR: [Demo: new unmapped billing tool](https://github.com/agentdiff-ai/agentdiff/pull/2)
 
 ## Coding Agent Harness Demo
 
@@ -48,4 +48,4 @@ Shows:
 - head recorded agent trace changes `test/auth.test.js`
 - agentdiff flags a suspicious coding-agent fix
 
-Live PR: [Demo: coding agent edits test instead of implementation](https://github.com/EgemennSahin/agentdiff/pull/3)
+Live PR: [Demo: coding agent edits test instead of implementation](https://github.com/agentdiff-ai/agentdiff/pull/3)

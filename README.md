@@ -19,7 +19,7 @@ Agentdiff runs in GitHub Actions, writes a PR-readable report, and updates one s
 
 ### 1. Unsafe Behavior Change
 
-Draft PR: [Demo: unsafe support refund behavior](https://github.com/EgemennSahin/agentdiff/pull/1)
+Draft PR: [Demo: unsafe support refund behavior](https://github.com/agentdiff-ai/agentdiff/pull/1)
 
 This PR changes an existing support agent from safe escalation to direct execution.
 
@@ -43,7 +43,7 @@ The point: normal tests can pass while agent behavior becomes more dangerous.
 
 ### 2. Map Drift / New Unmapped Tool
 
-Draft PR: [Demo: new unmapped billing tool](https://github.com/EgemennSahin/agentdiff/pull/2)
+Draft PR: [Demo: new unmapped billing tool](https://github.com/agentdiff-ai/agentdiff/pull/2)
 
 This PR adds a new billing tool that is not present in `.agentdiff/map.json`.
 
@@ -68,7 +68,7 @@ The point: evals rot when repos change faster than the agent map.
 
 ### 3. Recorded Coding-Agent Harness
 
-Draft PR: [Demo: coding agent edits test instead of implementation](https://github.com/EgemennSahin/agentdiff/pull/3)
+Draft PR: [Demo: coding agent edits test instead of implementation](https://github.com/agentdiff-ai/agentdiff/pull/3)
 
 This PR runs the recorded coding-agent harness in GitHub Actions. The scenario asks an agent to fix an auth bug where expired sessions should be rejected.
 
@@ -94,7 +94,7 @@ The point: agentdiff can compare normalized agent traces, not just inspect sourc
 Clone and install:
 
 ```bash
-git clone https://github.com/EgemennSahin/agentdiff.git
+git clone https://github.com/agentdiff-ai/agentdiff.git
 cd agentdiff
 npm install
 ```
@@ -147,7 +147,7 @@ The live harness runs in a temporary fixture, asks the model for a validated JSO
 
 `agentdiff init --github-action` creates this workflow at `.github/workflows/agentdiff.yml`. You can also add it manually:
 
-Current prototype installs use `EgemennSahin/agentdiff@main`. Once the first stable tag exists, pin the workflow to `EgemennSahin/agentdiff@v0`. See [docs/release.md](docs/release.md) for the release checklist.
+Current prototype installs use `agentdiff-ai/agentdiff@main`. Once the first stable tag exists, pin the workflow to `agentdiff-ai/agentdiff@v0`. See [docs/release.md](docs/release.md) for the release checklist.
 
 ```yaml
 name: agentdiff
@@ -168,8 +168,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Prototype install: @main. Stable install after first tag: EgemennSahin/agentdiff@v0.
-      - uses: EgemennSahin/agentdiff@main
+      # Prototype install: @main. Stable install after first tag: agentdiff-ai/agentdiff@v0.
+      - uses: agentdiff-ai/agentdiff@main
         with:
           command: classify
           base: origin/${{ github.base_ref }}
@@ -186,8 +186,8 @@ jobs:
 Recorded harness workflow:
 
 ```yaml
-# Prototype install: @main. Stable install after first tag: EgemennSahin/agentdiff@v0.
-- uses: EgemennSahin/agentdiff@main
+# Prototype install: @main. Stable install after first tag: agentdiff-ai/agentdiff@v0.
+- uses: agentdiff-ai/agentdiff@main
   with:
     command: run
     example: coding-agent-harness

@@ -61,7 +61,7 @@ async function main() {
       apiKey: process.env.OPENROUTER_API_KEY,
       baseURL: OPENROUTER_BASE_URL,
       defaultHeaders: {
-        "HTTP-Referer": "https://github.com/EgemennSahin/agentdiff",
+        "HTTP-Referer": "https://github.com/agentdiff-ai/agentdiff",
         "X-Title": "agentdiff"
       }
     });

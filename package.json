@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EgemennSahin/agentdiff.git"
+    "url": "git+https://github.com/agentdiff-ai/agentdiff.git"
   },
   "bin": {
     "agentdiff": "packages/cli/bin/agentdiff.js"
