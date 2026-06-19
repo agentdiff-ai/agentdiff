@@ -119,27 +119,34 @@ export function classifyChangedFile({ filePath, content = "" }) {
     evidence.push("content contains tool/schema pattern");
   }
 
-  if (/\b(delete|refund|charge|send|publish|close|update|write|grant|revoke|approve|reject)\b/.test(context) || /\bcreate\b/.test(context) && hasStrongMutationContext(context)) {
-    risk.push("state_mutation");
-    evidence.push("name or content suggests state mutation");
-  }
+  // Docs, tests, and config files are passive surfaces: their prose or fixture
+  // code commonly contains agent vocabulary without being runtime agent behaviour.
+  // Content-based risk tags are only assigned for files that could execute at runtime.
+  const isPassiveSurface = isDocPath(normalized) || isTestPath(normalized) || isConfigPath(normalized);
 
-  const exportedHighRiskFunction = exportedFunctions.find((name) => isHighRiskCall(name, context));
-  if (exportedHighRiskFunction) {
-    risk.push("state_mutation");
-    evidence.push(`exported function ${exportedHighRiskFunction} suggests state mutation`);
-  }
+  if (!isPassiveSurface) {
+    if (/\b(delete|refund|charge|send|publish|close|update|write|grant|revoke|approve|reject)\b/.test(context) || /\bcreate\b/.test(context) && hasStrongMutationContext(context)) {
+      risk.push("state_mutation");
+      evidence.push("name or content suggests state mutation");
+    }
 
-  if (/\b(refund|charge|invoice|email|send|publish|recipientemail|customerid|amountusd|payment|accountid)\b/.test(normalized + "\n" + lowerContent)) {
-    risk.push("external_side_effect");
-    recommendedCheckDepth = "standard";
-    evidence.push("name or content suggests external side effect");
-  }
+    const exportedHighRiskFunction = exportedFunctions.find((name) => isHighRiskCall(name, context));
+    if (exportedHighRiskFunction) {
+      risk.push("state_mutation");
+      evidence.push(`exported function ${exportedHighRiskFunction} suggests state mutation`);
+    }
 
-  const sensitiveArgs = extractSensitiveArgumentNames(content);
-  if (sensitiveArgs.length > 0) {
-    confidence = Math.max(confidence, 0.82);
-    evidence.push(`function args include ${sensitiveArgs.join(", ")}`);
+    if (/\b(refund|charge|invoice|email|send|publish|recipientemail|customerid|amountusd|payment|accountid)\b/.test(normalized + "\n" + lowerContent)) {
+      risk.push("external_side_effect");
+      recommendedCheckDepth = "standard";
+      evidence.push("name or content suggests external side effect");
+    }
+
+    const sensitiveArgs = extractSensitiveArgumentNames(content);
+    if (sensitiveArgs.length > 0) {
+      confidence = Math.max(confidence, 0.82);
+      evidence.push(`function args include ${sensitiveArgs.join(", ")}`);
+    }
   }
 
   if (label !== "not_agent_related" && risk.length === 0) {
@@ -600,7 +607,11 @@ function explanationForDiffAwareFinding(finding) {
     ]),
     reachability_chain: [finding.path],
     risk_evidence: finding.evidence,
-    confidence_reason: finding.severity === "high" ? "high because this diff adds high-risk calls inside a changed surface" : "medium because this diff changes guardrail behavior"
+    confidence_reason: finding.severity === "high"
+      ? "high because this diff adds high-risk calls inside a changed surface"
+      : finding.severity === "low"
+        ? "low because this surface is a doc, test, or config file and is not presumed to be runtime agent code"
+        : "medium because this diff changes guardrail behavior"
   };
 }
 
@@ -751,6 +762,9 @@ function collectMappedSurfacePaths(agentMap) {
 function buildDiffAwareFindings(file) {
   if (!file.diffText) return [];
 
+  const normalizedFilePath = normalizePath(file.filePath).toLowerCase();
+  const isPassiveSurface = isDocPath(normalizedFilePath) || isTestPath(normalizedFilePath) || isConfigPath(normalizedFilePath);
+
   const calls = extractCallsFromUnifiedDiff(file.diffText);
   const addedHighRiskCalls = calls.added_calls.filter((call) => isHighRiskCall(call));
   const removedSaferCalls = calls.removed_calls.filter(isSaferCall);
@@ -763,7 +777,16 @@ function buildDiffAwareFindings(file) {
     return [];
   }
 
-  const severity = addedHighRiskCalls.length > 0 ? "high" : "medium";
+  const severity = isPassiveSurface ? "low" : addedHighRiskCalls.length > 0 ? "high" : "medium";
+  const title = isPassiveSurface
+    ? "Agent-related vocabulary in docs/tests (informational)"
+    : addedHighRiskCalls.length > 0 ? "High-risk agent behavior added" : "Agent behavior guardrail changed";
+  const reason = isPassiveSurface
+    ? "This diff touches a docs, test, or config file that contains agent-related vocabulary. No runtime action is required unless this surface is a runtime prompt, scenario, or agent input."
+    : reasonForDiffAwareFinding({ addedHighRiskCalls, removedSaferCalls });
+  const recommendation = isPassiveSurface
+    ? "No action required for docs/tests/config. Add this path to .agentdiff ignore with a reason if this finding recurs."
+    : "Review before merge. Add confirmation, policy checks, or an approval scenario if this behavior is intended.";
   const evidence = [
     ...addedHighRiskCalls.map((call) => `added high-risk call: ${call}`),
     ...removedSaferCalls.map((call) => `removed safer call: ${call}`)
@@ -775,7 +798,7 @@ function buildDiffAwareFindings(file) {
       finding_type: "behavior_surface_change",
       path: file.filePath,
       severity,
-      title: addedHighRiskCalls.length > 0 ? "High-risk agent behavior added" : "Agent behavior guardrail changed",
+      title,
       added_calls: calls.added_calls,
       removed_calls: calls.removed_calls,
       added_high_risk_calls: addedHighRiskCalls,
@@ -789,8 +812,8 @@ function buildDiffAwareFindings(file) {
         removed_safer_calls: removedSaferCalls,
         evidence
       }),
-      reason: reasonForDiffAwareFinding({ addedHighRiskCalls, removedSaferCalls }),
-      recommendation: "Review before merge. Add confirmation, policy checks, or an approval scenario if this behavior is intended."
+      reason,
+      recommendation
     }
   ];
 }
