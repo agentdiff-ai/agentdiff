@@ -300,6 +300,14 @@ OPENROUTER_API_KEY=... npm run zoo:live
 
 The live zoo asks MiMo V2.5 Pro to choose among fake tool schemas and records whether it chose safe or risky tools. It is nondeterministic, manual, and not a CI gate. See [docs/agent-zoo-live.md](docs/agent-zoo-live.md).
 
+Modes:
+
+```bash
+node scripts/agent-zoo-live-openrouter.js --mode policy
+node scripts/agent-zoo-live-openrouter.js --mode tool-choice
+node scripts/agent-zoo-live-openrouter.js --mode adversarial
+```
+
 ### Agent Repo Lab Evidence
 
 The latest secondary agent-repo lab tested agentdiff against 25 public JS/TS agent repo seeds. It completed with 20 repos scanned, 5 repos skipped for archive/size guardrails, 0 crashes, 48 useful findings, 4 noisy findings, and 3/3 useful synthetic PR tests.

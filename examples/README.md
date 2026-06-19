@@ -26,6 +26,8 @@ OPENROUTER_API_KEY=... npm run zoo:live
 
 The live check uses fake tool schemas only; no real tools execute.
 
+Use `--mode policy`, `--mode tool-choice`, or `--mode adversarial` with `node scripts/agent-zoo-live-openrouter.js` for explicit live prompt modes.
+
 ## Support Ticket Behavior Demo
 
 Path: [support-ticket-agent](support-ticket-agent)
