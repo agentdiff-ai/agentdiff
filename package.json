@@ -15,6 +15,9 @@
     "demo": "node packages/cli/bin/agentdiff.js demo",
     "classify:demo": "node packages/cli/bin/agentdiff.js classify --files examples/support-ticket-agent/head/src/supportAgent.js",
     "scan:demo": "node packages/cli/bin/agentdiff.js scan --root examples/support-ticket-agent/head --out .agentdiff/map.json",
+    "stranger": "node scripts/stranger-test.js",
+    "stranger:self": "node scripts/stranger-test.js --mode self-test",
+    "stranger:bakeoff": "node scripts/stranger-test.js --mode repo-bakeoff",
     "video": "npm --prefix examples/remotion-demo run video",
     "outreach:draft": "node scripts/outreach/draft.js docs/outreach-targets.example.json",
     "test": "node tests/diff-extraction.test.mjs && node tests/map-drift.test.mjs && node tests/coding-agent-trace.test.mjs && node tests/openrouter-harness.test.mjs && node tests/outreach-draft.test.mjs && node packages/cli/bin/agentdiff.js demo --out .agentdiff/runs/latest"

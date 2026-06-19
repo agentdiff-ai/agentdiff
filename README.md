@@ -238,6 +238,16 @@ npm --prefix examples/remotion-demo run video
 
 The generated MP4 is written to `examples/remotion-demo/dist/agentdiff-demo.mp4` and is ignored by git.
 
+Run clean-install stranger tests:
+
+```bash
+npm run stranger:self
+npm run stranger:bakeoff
+npm run stranger
+```
+
+Reports are written to `.agentdiff/stranger-tests/latest/report.md` and are ignored by git. Stranger tests never require API keys or run live model harnesses.
+
 ## What Agentdiff Catches Today
 
 - Changed agent files in pull requests.

@@ -124,10 +124,6 @@ async function runLiveExample({ example }) {
 }
 
 async function classify({ files, out }) {
-  if (files.length === 0) {
-    throw new Error("no changed files provided; use --files or --base/--head");
-  }
-
   const outDir = path.resolve(process.cwd(), out);
   const agentMap = readAgentMapIfPresent();
   const report = buildClassificationReport({
