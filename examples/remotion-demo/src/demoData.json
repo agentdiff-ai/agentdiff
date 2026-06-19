@@ -1,0 +1,44 @@
+{
+  "title": "agentdiff: ci for ai agent behavior changes",
+  "tagline": "normal ci says the code runs. agentdiff says whether agent behavior got riskier.",
+  "durationSeconds": 75,
+  "installSnippet": "uses: EgemennSahin/agentdiff@main\\nwith:\\n  command: classify\\n  base: origin/${{ github.base_ref }}\\n  head: HEAD\\n  github-token: ${{ github.token }}",
+  "scenes": [
+    {
+      "kicker": "Normal CI",
+      "headline": "The code runs.",
+      "body": "Tests are green, but the agent can still get more dangerous.",
+      "bullets": ["build passes", "unit tests pass", "merge still changes agent behavior"]
+    },
+    {
+      "kicker": "Agentdiff",
+      "headline": "The agent got riskier.",
+      "body": "A sticky PR comment explains the behavior change before merge.",
+      "bullets": ["PR-native", "map-aware", "BYOK / no hosted backend"]
+    },
+    {
+      "kicker": "PR #1",
+      "headline": "Unsafe refund behavior",
+      "body": "Existing support behavior changed from escalation to direct state mutation.",
+      "bullets": ["added issue_refund", "added close_ticket", "removed escalation"]
+    },
+    {
+      "kicker": "PR #2",
+      "headline": "Map drift",
+      "body": "A new billing tool appears before the agent map knows about it.",
+      "bullets": ["new sendInvoice.js", "not in .agentdiff/map.json", "external side effect"]
+    },
+    {
+      "kicker": "PR #3",
+      "headline": "Harness-backed trace diff",
+      "body": "The coding agent was asked to fix auth, but edited the test instead.",
+      "bullets": ["base changed src/auth.js", "head changed test/auth.test.js", "suspicious coding-agent fix"]
+    },
+    {
+      "kicker": "Install",
+      "headline": "Add one GitHub Action.",
+      "body": "Agentdiff writes a job summary, report artifact, and one sticky PR comment.",
+      "bullets": ["open-source", "BYOK", "JavaScript / TypeScript first"]
+    }
+  ]
+}

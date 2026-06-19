@@ -15,6 +15,7 @@
     "demo": "node packages/cli/bin/agentdiff.js demo",
     "classify:demo": "node packages/cli/bin/agentdiff.js classify --files examples/support-ticket-agent/head/src/supportAgent.js",
     "scan:demo": "node packages/cli/bin/agentdiff.js scan --root examples/support-ticket-agent/head --out .agentdiff/map.json",
+    "video": "npm --prefix examples/remotion-demo run video",
     "test": "node tests/diff-extraction.test.mjs && node tests/map-drift.test.mjs && node tests/coding-agent-trace.test.mjs && node tests/openrouter-harness.test.mjs && node packages/cli/bin/agentdiff.js demo --out .agentdiff/runs/latest"
   }
 }

@@ -1,0 +1,17 @@
+{
+  "name": "agentdiff-remotion-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "remotion preview src/index.jsx",
+    "validate-data": "node scripts/validate-data.js",
+    "video": "npm run validate-data && remotion render src/index.jsx AgentdiffDemo dist/agentdiff-demo.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.397",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "remotion": "^4.0.397"
+  },
+  "devDependencies": {}
+}
