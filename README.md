@@ -248,6 +248,8 @@ npm run stranger
 
 Reports are written to `.agentdiff/stranger-tests/latest/report.md` and are ignored by git. Stranger tests never require API keys or run live model harnesses.
 
+Read the public repo bakeoff summary: [docs/bakeoff.md](docs/bakeoff.md).
+
 ## What Agentdiff Catches Today
 
 - Changed agent files in pull requests.
