@@ -10,6 +10,7 @@
   "scripts": {
     "agentdiff": "node packages/cli/bin/agentdiff.js",
     "demo": "node packages/cli/bin/agentdiff.js demo",
+    "classify:demo": "node packages/cli/bin/agentdiff.js classify --files examples/support-ticket-agent/head/src/supportAgent.js",
     "test": "node packages/cli/bin/agentdiff.js demo --out .agentdiff/runs/latest"
   }
 }

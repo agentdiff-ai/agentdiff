@@ -25,6 +25,28 @@ The demo compares:
 - base: classify ticket, escalate for human billing review, keep ticket open
 - head: issue refund without confirmation, close ticket
 
+## CLI
+
+Create starter config and local agentdiff files:
+
+```bash
+node packages/cli/bin/agentdiff.js init
+```
+
+Classify changed files without running an agent harness:
+
+```bash
+node packages/cli/bin/agentdiff.js classify --files examples/support-ticket-agent/head/src/supportAgent.js
+```
+
+Compare two normalized traces:
+
+```bash
+node packages/cli/bin/agentdiff.js run \
+  --base examples/support-ticket-agent/traces/base.json \
+  --head examples/support-ticket-agent/traces/head.json
+```
+
 ## Why This Matters
 
 Normal CI can say the code still runs. Agentdiff asks whether the agent now behaves dangerously.

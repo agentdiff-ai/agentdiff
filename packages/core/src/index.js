@@ -12,6 +12,123 @@ export function readJson(path) {
   return JSON.parse(fs.readFileSync(path, "utf8"));
 }
 
+export function classifyChangedFile({ filePath, content = "" }) {
+  const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+  const lowerContent = content.toLowerCase();
+  const evidence = [];
+  const risk = [];
+  let label = "not_agent_related";
+  let confidence = 0.15;
+  let recommendedCheckDepth = "classify";
+
+  if (matchesAny(normalized, ["agent", "assistant", "workflow", "orchestrator"])) {
+    label = "agent_entrypoint";
+    confidence = Math.max(confidence, 0.72);
+    evidence.push("path suggests agent entrypoint or orchestration code");
+  }
+
+  if (matchesAny(normalized, ["prompt", "system-message", "instructions"])) {
+    label = "prompt";
+    confidence = Math.max(confidence, 0.78);
+    evidence.push("path suggests prompt or instruction surface");
+  }
+
+  if (matchesAny(normalized, ["tool", "tools", "function", "action"])) {
+    label = "tool_implementation";
+    confidence = Math.max(confidence, 0.76);
+    evidence.push("path suggests tool implementation");
+  }
+
+  if (matchesAny(normalized, ["schema", "zod", "jsonschema"])) {
+    label = label === "not_agent_related" ? "tool_definition" : label;
+    confidence = Math.max(confidence, 0.62);
+    evidence.push("path suggests schema or tool definition");
+  }
+
+  if (matchesAny(normalized, ["model", "provider", "router", "llm"])) {
+    label = label === "not_agent_related" ? "model_config" : label;
+    confidence = Math.max(confidence, 0.65);
+    evidence.push("path suggests model/provider configuration");
+  }
+
+  if (matchesAny(normalized, ["retriev", "vector", "embedding", "memory"])) {
+    label = label === "not_agent_related" ? "retrieval" : label;
+    confidence = Math.max(confidence, 0.62);
+    evidence.push("path suggests retrieval or memory surface");
+  }
+
+  if (/\b(openai|anthropic|chat\.completions|responses\.create|generateobject|streamtext)\b/.test(lowerContent)) {
+    label = label === "not_agent_related" ? "agent_entrypoint" : label;
+    confidence = Math.max(confidence, 0.82);
+    evidence.push("content contains model-call pattern");
+  }
+
+  if (/\b(z\.object|jsonschema|parameters|tool_call|function_call)\b/.test(lowerContent)) {
+    label = label === "not_agent_related" ? "tool_definition" : label;
+    confidence = Math.max(confidence, 0.78);
+    evidence.push("content contains tool/schema pattern");
+  }
+
+  if (/\b(delete|refund|charge|send|publish|close|update|create|write)\b/.test(normalized + "\n" + lowerContent)) {
+    risk.push("state_mutation");
+    evidence.push("name or content suggests state mutation");
+  }
+
+  if (/\b(refund|charge|invoice|email|send|publish)\b/.test(normalized + "\n" + lowerContent)) {
+    risk.push("external_side_effect");
+    recommendedCheckDepth = "standard";
+    evidence.push("name or content suggests external side effect");
+  }
+
+  if (label !== "not_agent_related" && risk.length === 0) {
+    recommendedCheckDepth = "light";
+  }
+
+  if (label === "not_agent_related") {
+    evidence.push("no agent-related path or content signals detected");
+  }
+
+  return {
+    path: filePath,
+    label,
+    confidence: Number(confidence.toFixed(2)),
+    risk: [...new Set(risk)],
+    evidence: [...new Set(evidence)],
+    recommended_check_depth: recommendedCheckDepth
+  };
+}
+
+export function buildClassificationReport({ files, repo = process.cwd() }) {
+  const changedSurfaces = files.map((file) => classifyChangedFile(file));
+  const mapDrift = changedSurfaces
+    .filter((surface) => surface.label !== "not_agent_related")
+    .map((surface) => ({
+      finding_type: "changed_agent_surface",
+      severity: surface.risk.includes("external_side_effect") ? "high" : "medium",
+      path: surface.path,
+      label: surface.label,
+      risk: surface.risk,
+      evidence: surface.evidence,
+      recommendation: recommendationForSurface(surface)
+    }));
+
+  const status = statusFromFindings(mapDrift);
+
+  return {
+    run_id: new Date().toISOString().replace(/[:.]/g, "-"),
+    repo,
+    mode: "classify",
+    status,
+    changed_surfaces: changedSurfaces,
+    map_drift: mapDrift,
+    behavior_findings: [],
+    cost: {
+      estimated_cost_usd: 0,
+      actual_cost_usd: 0
+    }
+  };
+}
+
 export function analyzeTracePair({ baseTrace, headTrace }) {
   const findings = [];
   const baseTools = baseTrace.tool_calls ?? [];
@@ -143,6 +260,26 @@ function statusFromFindings(findings) {
   if (findings.some((finding) => finding.severity === "high")) return "action_required";
   if (findings.some((finding) => finding.severity === "medium")) return "warn";
   return "pass";
+}
+
+function recommendationForSurface(surface) {
+  if (surface.risk.includes("external_side_effect")) {
+    return "Add or update a scenario before merge. External side effects should not ship without a behavior check.";
+  }
+
+  if (surface.label === "prompt") {
+    return "Run at least a light behavior check because prompt edits can change tool choice and policy behavior.";
+  }
+
+  if (surface.label === "model_config") {
+    return "Review cost, latency, and model capability impact before merge.";
+  }
+
+  return "Review whether this surface belongs in .agentdiff/map.json.";
+}
+
+function matchesAny(value, needles) {
+  return needles.some((needle) => value.includes(needle));
 }
 
 function summarizeTrace(trace) {
