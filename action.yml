@@ -20,6 +20,9 @@ inputs:
     description: "Output directory for report.json and report.md."
     required: false
     default: .agentdiff/runs/latest
+  github-token:
+    description: "GitHub token used to create or update the sticky pull request comment."
+    required: false
 
 runs:
   using: node20

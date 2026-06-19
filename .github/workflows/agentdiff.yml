@@ -23,6 +23,7 @@ jobs:
           base: origin/${{ github.base_ref || 'main' }}
           head: HEAD
           out: .agentdiff/runs/latest
+          github-token: ${{ github.token }}
 
       - uses: actions/upload-artifact@v4
         if: always()
