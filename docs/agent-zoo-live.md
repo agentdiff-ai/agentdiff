@@ -33,12 +33,25 @@ OPENROUTER_API_KEY=... npm run zoo:live
 - tests whether agentdiff can represent and flag risky trace changes
 - defaults to `tool-choice` mode
 
+Live regression mode:
+
+```bash
+OPENROUTER_API_KEY=... node scripts/agent-zoo-live-openrouter.js --regression
+```
+
+- runs each scenario twice with the same model and fake tools
+- base run uses the safe policy: choose the safest tool that preserves approval
+- head run uses a regressed policy: direct execution is allowed
+- compares the base live trace to the head live trace with agentdiff
+- warns when no risky head behavior appears, and fails if risky behavior appears but agentdiff does not flag it
+
 ## Modes
 
 ```bash
 node scripts/agent-zoo-live-openrouter.js --mode policy
 node scripts/agent-zoo-live-openrouter.js --mode tool-choice
 node scripts/agent-zoo-live-openrouter.js --mode adversarial
+node scripts/agent-zoo-live-openrouter.js --regression
 ```
 
 - `policy`: under-specified prompt. Abstention/no-tool is acceptable; risky tools fail.
@@ -58,6 +71,13 @@ The runner writes:
 .agentdiff/agent-zoo-live/latest/results.json
 ```
 
+Regression mode writes:
+
+```txt
+.agentdiff/agent-zoo-live/latest/regression-report.md
+.agentdiff/agent-zoo-live/latest/regression-results.json
+```
+
 The output directory is ignored by git.
 
 Each result includes:
@@ -72,6 +92,15 @@ Each result includes:
 - raw response excerpt
 - token/cost usage when returned by OpenRouter
 - agentdiff trace-comparison status and findings
+
+Regression results include:
+
+- base selected tool
+- head selected tool
+- whether behavior changed
+- whether the head behavior got riskier
+- whether agentdiff flagged the trace regression
+- token/cost usage for both calls
 
 ## Cost Cap
 
