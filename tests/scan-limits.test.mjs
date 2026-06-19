@@ -49,6 +49,24 @@ try {
   assert.ok(map.scan.skipped_by_reason["ignored directory: generated"] >= 1);
   assert.ok(map.scan.skipped_by_reason["ignored directory: node_modules"] >= 1);
   assert.ok(map.surfaces.every((surface) => !surface.path.includes("generated") && !surface.path.includes("node_modules")));
+
+  const tinyMapOutPath = path.join(tempRoot, ".agentdiff", "runs", "tiny-map", "map.json");
+  const tinyMapResult = spawnSync(process.execPath, [cli, "scan", "--root", tempRoot, "--out", tinyMapOutPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      AGENTDIFF_SCAN_MAX_FILE_BYTES: "4096",
+      AGENTDIFF_SCAN_MAX_FILES: "20",
+      AGENTDIFF_SCAN_MAX_TOTAL_BYTES: "100000",
+      AGENTDIFF_SCAN_MAX_MAP_BYTES: "1200"
+    }
+  });
+
+  assert.equal(tinyMapResult.status, 0, tinyMapResult.stderr);
+  const tinyMap = JSON.parse(fs.readFileSync(tinyMapOutPath, "utf8"));
+  assert.equal(tinyMap.scan.partial, true);
+  assert.ok(tinyMap.scan.scan_limit_warnings.some((warning) => warning.includes("partial map")));
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }

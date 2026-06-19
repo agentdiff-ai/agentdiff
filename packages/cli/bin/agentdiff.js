@@ -1015,16 +1015,56 @@ function isSkippedFileName(fileName) {
 
 function serializeMapWithinLimit(map) {
   const limit = map.scan?.limits?.maxMapBytes ?? readScanLimits().maxMapBytes;
-  let serialized = JSON.stringify(map, null, 2);
+  let serialized = stringifyMap(map);
   if (Buffer.byteLength(serialized, "utf8") <= limit) return serialized;
 
   map.scan.partial = true;
   map.scan.scan_limit_warnings.push(`partial map: serialized map exceeded ${limit} bytes; truncated surface details`);
-  map.surfaces = map.surfaces.slice(0, 1000);
-  map.agents = map.agents.slice(0, 200);
-  map.evidence = map.evidence?.slice(0, 1000) ?? [];
-  serialized = JSON.stringify(map, null, 2);
+  pruneMapForSerialization(map);
+  serialized = stringifyMap(map);
   return serialized;
+}
+
+function stringifyMap(map) {
+  try {
+    return JSON.stringify(map, null, 2);
+  } catch (error) {
+    if (!/Invalid string length/i.test(error.message)) throw error;
+    map.scan.partial = true;
+    map.scan.scan_limit_warnings.push("partial map: serialized map was too large; pruned optional details");
+    pruneMapForSerialization(map);
+    return JSON.stringify(map, null, 2);
+  }
+}
+
+function pruneMapForSerialization(map) {
+  map.surfaces = (map.surfaces ?? []).slice(0, 1000).map((surface) => ({
+    ...surface,
+    evidence: (surface.evidence ?? []).slice(0, 8),
+    explanation: surface.explanation
+      ? {
+          ...surface.explanation,
+          why_flagged: (surface.explanation.why_flagged ?? []).slice(0, 8),
+          risk_evidence: (surface.explanation.risk_evidence ?? []).slice(0, 8)
+        }
+      : surface.explanation,
+    imported_by: (surface.imported_by ?? []).slice(0, 12),
+    reachable_entrypoints: (surface.reachable_entrypoints ?? []).slice(0, 12),
+    reachability_chain: (surface.reachability_chain ?? []).slice(0, 24)
+  }));
+  map.agents = (map.agents ?? []).slice(0, 200).map((agent) => ({
+    ...agent,
+    evidence: (agent.evidence ?? []).slice(0, 12)
+  }));
+  map.evidence = (map.evidence ?? []).slice(0, 1000);
+  if (map.import_graph) {
+    map.import_graph = {
+      ...map.import_graph,
+      nodes: (map.import_graph.nodes ?? []).slice(0, 5000),
+      edges: (map.import_graph.edges ?? []).slice(0, 10000),
+      reachable_files: (map.import_graph.reachable_files ?? []).slice(0, 5000)
+    };
+  }
 }
 
 function readAgentMapIfPresent() {
