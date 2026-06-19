@@ -204,7 +204,8 @@ async function scan({ root, out }) {
     reachable_files: map.import_graph.reachable_files.length,
     alias_imports_resolved: map.import_graph.alias_imports_resolved,
     workspace_imports_resolved: map.import_graph.workspace_imports_resolved,
-    unresolved_non_relative_imports: map.import_graph.unresolved_non_relative_imports
+    unresolved_non_relative_imports: map.import_graph.unresolved_non_relative_imports,
+    unresolved_import_buckets: map.import_graph.unresolved_import_buckets
   };
 
   const outPath = path.resolve(process.cwd(), out);
@@ -228,6 +229,9 @@ async function scan({ root, out }) {
   console.log(`alias imports resolved: ${map.scan.alias_imports_resolved}`);
   console.log(`workspace imports resolved: ${map.scan.workspace_imports_resolved}`);
   console.log(`unresolved non-relative imports: ${map.scan.unresolved_non_relative_imports}`);
+  for (const [bucket, value] of Object.entries(map.scan.unresolved_import_buckets ?? {})) {
+    console.log(`unresolved ${bucket}: ${value.count}`);
+  }
   console.log(`agent surfaces: ${map.surfaces.length}`);
   console.log(`agents: ${map.agents.length}`);
   console.log(`map: ${outPath}`);
@@ -887,9 +891,11 @@ function readWorkspacePackages(rootDir) {
 
   const rootPackage = readJsonFileSafe(rootPackageJson);
   const workspacePatterns = workspacePatternsFromPackage(rootPackage);
-  if (workspacePatterns.length === 0) return [];
 
   const packageDirs = new Set();
+  if (rootPackage?.name) {
+    packageDirs.add(rootDir);
+  }
   for (const pattern of workspacePatterns) {
     for (const packageDir of findWorkspacePackageDirs(rootDir, pattern)) {
       packageDirs.add(packageDir);
@@ -904,7 +910,8 @@ function readWorkspacePackages(rootDir) {
     packages.push({
       packageName: packageJson.name,
       packageRoot: path.relative(process.cwd(), packageDir).replaceAll("\\", "/"),
-      entrypoints: simplePackageEntrypoints(packageJson)
+      entrypoints: simplePackageEntrypoints(packageJson),
+      subpathExports: simplePackageSubpathExports(packageJson)
     });
   }
   return packages;
@@ -978,6 +985,29 @@ function entrypointsFromExports(exportsField) {
   return ["import", "require", "default", "module", "types"].flatMap((field) =>
     typeof rootExport[field] === "string" ? [rootExport[field]] : []
   );
+}
+
+function simplePackageSubpathExports(packageJson) {
+  const exportsField = packageJson?.exports;
+  if (!exportsField || typeof exportsField !== "object" || Array.isArray(exportsField)) return [];
+
+  const entries = [];
+  for (const [subpathPattern, target] of Object.entries(exportsField)) {
+    if (subpathPattern === "." || !subpathPattern.startsWith("./")) continue;
+    const targetPatterns = exportTargets(target);
+    if (targetPatterns.length === 0) continue;
+    entries.push({
+      subpathPattern,
+      targetPatterns
+    });
+  }
+  return entries;
+}
+
+function exportTargets(value) {
+  if (typeof value === "string") return [value];
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return ["import", "require", "default", "module", "types"].flatMap((field) => (typeof value[field] === "string" ? [value[field]] : []));
 }
 
 function readJsonFileSafe(filePath) {

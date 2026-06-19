@@ -114,7 +114,8 @@ const aliasWorkspaceMap = buildAgentMap({
       {
         packageName: "@repo/agent",
         packageRoot: "packages/agent",
-        entrypoints: ["src/index"]
+        entrypoints: ["src/index"],
+        subpathExports: [{ subpathPattern: "./public/*", targetPatterns: ["./source/*.ts"] }]
       }
     ]
   },
@@ -123,18 +124,27 @@ const aliasWorkspaceMap = buildAgentMap({
       filePath: "apps/web/src/supportAgent.ts",
       content: `
 import React from "react";
+import fs from "node:fs";
 import { sendInvoice } from "@/tools/sendInvoice";
 import { closeTicket } from "~/tools/closeTicket";
 import { logInvoice } from "@repo/internal";
 import { runAgent } from "@repo/agent";
 import { chargeCard } from "@repo/agent/tools/chargeCard";
+import { exportedTool } from "@repo/agent/public/exportedTool";
 import { outside } from "@outside/secret";
+import { missingAlias } from "@/missing/tool";
+import { missingWorkspace } from "@repo/missing/tool";
+import virtualThing from "virtual:agent-tool";
 export async function runSupportAgent() {
   await sendInvoice();
   await closeTicket();
   await logInvoice();
   await runAgent();
   await chargeCard();
+  await exportedTool();
+  await missingAlias();
+  await missingWorkspace();
+  await virtualThing();
   return outside;
 }
 `
@@ -162,6 +172,10 @@ export async function runSupportAgent() {
     {
       filePath: "packages/agent/src/tools/chargeCard.ts",
       content: `export function chargeCard(customerId, amountUsd) { return { customerId, amountUsd }; }`
+    },
+    {
+      filePath: "packages/agent/source/exportedTool.ts",
+      content: `export function exportedTool(customerId) { return customerId; }`
     }
   ]
 });
@@ -199,10 +213,29 @@ assert.equal(
   ),
   true
 );
+assert.equal(
+  aliasEdges.some(
+    (edge) => edge.to === "packages/agent/source/exportedTool.ts" && edge.resolved_via === "workspace_package" && edge.package_name === "@repo/agent"
+  ),
+  true
+);
 assert.equal(aliasEdges.some((edge) => edge.import_statement.includes("@outside/secret")), false);
 assert.equal(aliasWorkspaceMap.import_graph.alias_imports_resolved, 3);
-assert.equal(aliasWorkspaceMap.import_graph.workspace_imports_resolved, 2);
-assert.deepEqual(aliasWorkspaceMap.import_graph.unresolved_non_relative_import_samples, ["@outside/secret", "react"]);
+assert.equal(aliasWorkspaceMap.import_graph.workspace_imports_resolved, 3);
+assert.deepEqual(aliasWorkspaceMap.import_graph.unresolved_non_relative_import_samples, [
+  "@/missing/tool",
+  "@outside/secret",
+  "@repo/missing/tool",
+  "node:fs",
+  "react",
+  "virtual:agent-tool"
+]);
+assert.equal(aliasWorkspaceMap.import_graph.unresolved_import_buckets.external_dependency_like.count, 2);
+assert.equal(aliasWorkspaceMap.import_graph.unresolved_import_buckets.alias_like.count, 2);
+assert.equal(aliasWorkspaceMap.import_graph.unresolved_import_buckets.workspace_package_like.count, 1);
+assert.equal(aliasWorkspaceMap.import_graph.unresolved_import_buckets.unknown.count, 1);
+assert.equal(aliasWorkspaceMap.import_graph.unresolved_import_buckets.external_dependency_like.samples[0].specifier, "react");
+assert.equal(aliasWorkspaceMap.import_graph.unresolved_import_buckets.workspace_package_like.samples[0].specifier, "@repo/missing/tool");
 
 const reachableCharge = aliasWorkspaceMap.surfaces.find((surface) => surface.path === "packages/agent/src/tools/chargeCard.ts");
 assert.ok(reachableCharge);
@@ -309,7 +342,10 @@ try {
       2
     )
   );
-  fs.writeFileSync(path.join(scanFixtureRoot, "package.json"), JSON.stringify({ workspaces: ["packages/agent"] }, null, 2));
+  fs.writeFileSync(
+    path.join(scanFixtureRoot, "package.json"),
+    JSON.stringify({ name: "@fixture/root", exports: { "./self": "./src/self.ts" }, workspaces: ["packages/agent"] }, null, 2)
+  );
   fs.writeFileSync(
     path.join(scanFixtureRoot, "app", "supportAgent.ts"),
     `
@@ -318,22 +354,34 @@ import { sendInvoice } from "@/tools/sendInvoice";
 import { closeTicket } from "~/tools/closeTicket";
 import { aliasTool } from "@repo/aliasOnly";
 import { runAgent } from "@repo/agent";
-import { chargeCard } from "@repo/agent/tools/chargeCard";
+import { chargeCard } from "@repo/agent/public/chargeCard";
+import { rootSelf } from "@fixture/root/self";
 import { outside } from "@outside/secret";
+import { missingAlias } from "@/missing/tool";
+import { missingWorkspace } from "@repo/missing/tool";
+import virtualThing from "virtual:agent-tool";
 export async function supportAgent() {
   await sendInvoice();
   await closeTicket();
   await aliasTool();
   await runAgent();
   await chargeCard();
+  await rootSelf();
+  await missingAlias();
+  await missingWorkspace();
+  await virtualThing();
   return outside;
 }
 `
   );
   fs.writeFileSync(path.join(scanFixtureRoot, "src", "tools", "sendInvoice.ts"), "export function sendInvoice(recipientEmail, amountUsd) { return amountUsd; }\n");
   fs.writeFileSync(path.join(scanFixtureRoot, "src", "tools", "closeTicket.ts"), "export function closeTicket(ticketId) { return ticketId; }\n");
+  fs.writeFileSync(path.join(scanFixtureRoot, "src", "self.ts"), "export function rootSelf(customerId) { return customerId; }\n");
   fs.writeFileSync(path.join(scanFixtureRoot, "packages", "aliasOnly", "src", "index.ts"), "export function aliasTool() { return true; }\n");
-  fs.writeFileSync(path.join(scanFixtureRoot, "packages", "agent", "package.json"), JSON.stringify({ name: "@repo/agent", exports: "./src/index.ts" }, null, 2));
+  fs.writeFileSync(
+    path.join(scanFixtureRoot, "packages", "agent", "package.json"),
+    JSON.stringify({ name: "@repo/agent", exports: { ".": "./src/index.ts", "./public/*": "./src/tools/*.ts" } }, null, 2)
+  );
   fs.writeFileSync(path.join(scanFixtureRoot, "packages", "agent", "src", "index.ts"), "export function runAgent() { return true; }\n");
   fs.writeFileSync(path.join(scanFixtureRoot, "packages", "agent", "src", "tools", "chargeCard.ts"), "export function chargeCard(amountUsd) { return amountUsd; }\n");
 
@@ -345,17 +393,27 @@ export async function supportAgent() {
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /alias imports resolved: 3/);
-  assert.match(result.stdout, /workspace imports resolved: 2/);
-  assert.match(result.stdout, /unresolved non-relative imports: 2/);
+  assert.match(result.stdout, /workspace imports resolved: 3/);
+  assert.match(result.stdout, /unresolved non-relative imports: 5/);
+  assert.match(result.stdout, /unresolved external_dependency_like: 2/);
+  assert.match(result.stdout, /unresolved workspace_package_like: 1/);
+  assert.match(result.stdout, /unresolved alias_like: 1/);
+  assert.match(result.stdout, /unresolved unknown: 1/);
 
   const scanMap = JSON.parse(fs.readFileSync(outPath, "utf8"));
   assert.equal(scanMap.scan.alias_imports_resolved, 3);
-  assert.equal(scanMap.scan.workspace_imports_resolved, 2);
-  assert.equal(scanMap.scan.unresolved_non_relative_imports, 2);
+  assert.equal(scanMap.scan.workspace_imports_resolved, 3);
+  assert.equal(scanMap.scan.unresolved_non_relative_imports, 5);
+  assert.equal(scanMap.scan.unresolved_import_buckets.external_dependency_like.count, 2);
+  assert.equal(scanMap.scan.unresolved_import_buckets.workspace_package_like.count, 1);
+  assert.equal(scanMap.scan.unresolved_import_buckets.alias_like.count, 1);
+  assert.equal(scanMap.scan.unresolved_import_buckets.unknown.count, 1);
   assert.ok(scanMap.import_graph.edges.some((edge) => edge.resolved_via === "tsconfig_paths" && edge.alias_pattern === "@/*"));
   assert.ok(scanMap.import_graph.edges.some((edge) => edge.resolved_via === "tsconfig_paths" && edge.alias_pattern === "~/*"));
   assert.ok(scanMap.import_graph.edges.some((edge) => edge.resolved_via === "tsconfig_paths" && edge.alias_pattern === "@repo/*"));
   assert.ok(scanMap.import_graph.edges.some((edge) => edge.resolved_via === "workspace_package" && edge.package_name === "@repo/agent"));
+  assert.ok(scanMap.import_graph.edges.some((edge) => edge.to.endsWith("packages/agent/src/tools/chargeCard.ts") && edge.resolved_via === "workspace_package"));
+  assert.ok(scanMap.import_graph.edges.some((edge) => edge.to.endsWith("src/self.ts") && edge.resolved_via === "workspace_package" && edge.package_name === "@fixture/root"));
 } finally {
   fs.rmSync(scanFixtureRoot, { recursive: true, force: true });
 }

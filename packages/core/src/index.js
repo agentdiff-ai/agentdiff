@@ -1309,7 +1309,11 @@ function normalizeImportResolver(importResolver = {}) {
       .map((entry) => ({
         packageName: entry.packageName,
         packageRoot: normalizePath(entry.packageRoot),
-        entrypoints: (entry.entrypoints ?? []).map((item) => normalizePath(item)).filter(Boolean)
+        entrypoints: (entry.entrypoints ?? []).map((item) => normalizePath(item)).filter(Boolean),
+        subpathExports: (entry.subpathExports ?? []).map((item) => ({
+          subpathPattern: normalizePath(item.subpathPattern ?? ""),
+          targetPatterns: (item.targetPatterns ?? []).map((target) => normalizePath(target)).filter(Boolean)
+        }))
       }))
       .sort((left, right) => right.packageName.length - left.packageName.length)
   };
@@ -1413,11 +1417,127 @@ function resolveWorkspacePackageImport(specifier, workspacePackages, fileSet) {
 function workspacePackageCandidatePaths(workspacePackage, subpath) {
   const root = workspacePackage.packageRoot;
   if (subpath) {
-    return [joinPath(root, subpath), joinPath(joinPath(root, "src"), subpath)];
+    return [
+      ...workspacePackageExportCandidatePaths(workspacePackage, subpath),
+      joinPath(root, subpath),
+      joinPath(joinPath(root, "src"), subpath)
+    ];
   }
 
   const entrypoints = workspacePackage.entrypoints.length > 0 ? workspacePackage.entrypoints : ["src/index", "index"];
   return entrypoints.map((entrypoint) => joinPath(root, entrypoint.replace(/^\.\//, "")));
+}
+
+function workspacePackageExportCandidatePaths(workspacePackage, subpath) {
+  const candidates = [];
+  for (const entry of workspacePackage.subpathExports ?? []) {
+    const match = matchAliasPattern(subpath, entry.subpathPattern.replace(/^\.\//, ""));
+    if (!match.matched) continue;
+    for (const targetPattern of entry.targetPatterns) {
+      const target = applyAliasTargetPattern(targetPattern.replace(/^\.\//, ""), match.capture);
+      candidates.push(joinPath(workspacePackage.packageRoot, target));
+    }
+  }
+  return candidates;
+}
+
+function classifyUnresolvedImport({ specifier, resolver }) {
+  if (isAliasLikeSpecifier(specifier)) {
+    return {
+      bucket: "alias_like",
+      reason: "alias-like specifier did not resolve to a local file"
+    };
+  }
+
+  const workspaceMatch = matchingWorkspacePackage(specifier, resolver.workspacePackages);
+  if (workspaceMatch) {
+    return {
+      bucket: "workspace_package_like",
+      reason: `matched local workspace package ${workspaceMatch.packageName} but no obvious file/export resolved`
+    };
+  }
+
+  if (sharesWorkspaceScope(specifier, resolver.workspacePackages)) {
+    return {
+      bucket: "workspace_package_like",
+      reason: "shares a local workspace package scope but no matching package was found"
+    };
+  }
+
+  if (resolver.tsconfigPaths.some((entry) => matchAliasPattern(specifier, entry.aliasPattern).matched)) {
+    return {
+      bucket: "alias_like",
+      reason: "matched tsconfig/jsconfig alias pattern but target did not resolve"
+    };
+  }
+
+  if (isExternalDependencyLike(specifier)) {
+    return {
+      bucket: "external_dependency_like",
+      reason: "bare package import; likely external dependency"
+    };
+  }
+
+  return {
+    bucket: "unknown",
+    reason: "non-relative import is not covered by configured aliases or workspace packages"
+  };
+}
+
+function matchingWorkspacePackage(specifier, workspacePackages) {
+  return workspacePackages.find((workspacePackage) => specifier === workspacePackage.packageName || specifier.startsWith(`${workspacePackage.packageName}/`));
+}
+
+function sharesWorkspaceScope(specifier, workspacePackages) {
+  if (!specifier.startsWith("@")) return false;
+  const scope = specifier.split("/")[0];
+  return workspacePackages.some((workspacePackage) => workspacePackage.packageName.startsWith(`${scope}/`));
+}
+
+function isAliasLikeSpecifier(specifier) {
+  return specifier.startsWith("@/") || specifier.startsWith("~/") || specifier.startsWith("#/");
+}
+
+function isExternalDependencyLike(specifier) {
+  if (specifier.startsWith("node:")) return true;
+  if (specifier.startsWith("@")) return /^@[^/]+\/[^/]+(?:\/.*)?$/.test(specifier);
+  return /^[a-zA-Z0-9][\w.-]*(?:\/.*)?$/.test(specifier);
+}
+
+function makeUnresolvedImportBuckets() {
+  return {
+    external_dependency_like: { specifiers: new Set(), samples: [], sampleKeys: new Set() },
+    workspace_package_like: { specifiers: new Set(), samples: [], sampleKeys: new Set() },
+    alias_like: { specifiers: new Set(), samples: [], sampleKeys: new Set() },
+    unknown: { specifiers: new Set(), samples: [], sampleKeys: new Set() }
+  };
+}
+
+function addUnresolvedImportBucket(buckets, { bucket, specifier, fromPath, statement, reason }) {
+  const target = buckets[bucket] ?? buckets.unknown;
+  target.specifiers.add(specifier);
+  if (target.samples.length >= 12) return;
+  const key = `${specifier}\0${fromPath}`;
+  if (target.sampleKeys.has(key)) return;
+  target.sampleKeys.add(key);
+  target.samples.push({
+    specifier,
+    importing_file: fromPath,
+    reason,
+    import_statement: statement
+  });
+}
+
+function unresolvedBucketSummary(buckets) {
+  return Object.fromEntries(
+    Object.entries(buckets).map(([bucket, value]) => [
+      bucket,
+      {
+        count: value.specifiers.size,
+        samples: value.samples
+      }
+    ])
+  );
 }
 
 function relatedPaths(surfaces, label) {
@@ -1468,6 +1588,7 @@ export function buildImportGraph(files, importResolver = {}) {
   const edges = [];
   const resolver = normalizeImportResolver(importResolver);
   const unresolvedNonRelativeImports = new Set();
+  const unresolvedImportBuckets = makeUnresolvedImportBuckets();
   let aliasImportsResolved = 0;
   let workspaceImportsResolved = 0;
 
@@ -1475,7 +1596,15 @@ export function buildImportGraph(files, importResolver = {}) {
     for (const importRef of extractImportReferences(file.content)) {
       const resolved = resolveImportReference({ fromPath: file.filePath, importRef, fileSet, resolver });
       if (!resolved) {
-        if (!importRef.specifier.startsWith(".")) unresolvedNonRelativeImports.add(importRef.specifier);
+        if (!importRef.specifier.startsWith(".")) {
+          unresolvedNonRelativeImports.add(importRef.specifier);
+          addUnresolvedImportBucket(unresolvedImportBuckets, {
+            ...classifyUnresolvedImport({ specifier: importRef.specifier, resolver }),
+            specifier: importRef.specifier,
+            fromPath: file.filePath,
+            statement: importRef.statement
+          });
+        }
         continue;
       }
       if (resolved.resolved_via === "tsconfig_paths") aliasImportsResolved += 1;
@@ -1505,7 +1634,8 @@ export function buildImportGraph(files, importResolver = {}) {
     alias_imports_resolved: aliasImportsResolved,
     workspace_imports_resolved: workspaceImportsResolved,
     unresolved_non_relative_imports: unresolvedNonRelativeImports.size,
-    unresolved_non_relative_import_samples: [...unresolvedNonRelativeImports].sort().slice(0, 20)
+    unresolved_non_relative_import_samples: [...unresolvedNonRelativeImports].sort().slice(0, 20),
+    unresolved_import_buckets: unresolvedBucketSummary(unresolvedImportBuckets)
   };
 }
 

@@ -521,7 +521,7 @@ function recommendProductFixes(repos) {
     signal.signals.some((item) => /LangGraph|AI tool definition|AI SDK/.test(item))
   );
   const noisyDocs = repos.flatMap((repo) => repo.noisyFindings.map((finding) => ({ repo: repo.repo, ...finding }))).filter((finding) => finding.suppressible);
-  const unresolvedHeavy = repos.filter((repo) => repo.stats.unresolvedNonRelativeImports > 50);
+  const actionableUnresolvedHeavy = repos.filter((repo) => actionableUnresolvedCount(repo.stats.unresolvedImportBuckets) > 50);
   const syntheticWeak = repos.filter((repo) => repo.synthetic?.attempted && !repo.synthetic?.useful);
 
   if (missedLangGraph.length > 0) {
@@ -538,11 +538,13 @@ function recommendProductFixes(repos) {
       recommendation: "Keep docs/test findings visible, but move more of them to informational unless explicitly configured as runtime prompt or scenario input."
     });
   }
-  if (unresolvedHeavy.length > 0) {
+  if (actionableUnresolvedHeavy.length > 0) {
     fixes.push({
       title: "Reduce unresolved import blind spots in modern monorepos",
-      evidence: unresolvedHeavy.slice(0, 5).map((repo) => `${repo.repo}: ${repo.stats.unresolvedNonRelativeImports} unresolved non-relative imports`),
-      recommendation: "Inspect unresolved import samples and add only high-confidence resolver support, not full TypeScript compiler emulation."
+      evidence: actionableUnresolvedHeavy
+        .slice(0, 5)
+        .map((repo) => `${repo.repo}: ${actionableUnresolvedCount(repo.stats.unresolvedImportBuckets)} actionable unresolved imports (${bucketCounts(repo.stats.unresolvedImportBuckets)})`),
+      recommendation: "Inspect workspace/alias/unknown unresolved import samples and add only high-confidence resolver support, not full TypeScript compiler emulation."
     });
   }
   if (syntheticWeak.length > 0) {
@@ -597,14 +599,33 @@ function renderReport(report) {
   lines.push("");
   lines.push("## pass/crash table");
   lines.push("");
-  lines.push("| repo | status | files scanned | entrypoints | edges | reachable high-risk | missed signals | useful/noisy/unclear | scores |");
-  lines.push("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |");
+  lines.push("| repo | status | files scanned | entrypoints | edges | reachable high-risk | missed signals | unresolved buckets | useful/noisy/unclear | scores |");
+  lines.push("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |");
   for (const repo of report.repos) {
     lines.push(
-      `| ${repo.repo} | ${repo.status}${repo.skipReason ? ` (${repo.skipReason})` : ""} | ${repo.stats.filesScanned} | ${repo.stats.entrypointsFound} | ${repo.stats.importEdges} | ${repo.stats.reachableHighRiskSurfaces} | ${repo.missedSignals.length} | ${repo.usefulFindings.length}/${repo.noisyFindings.length}/${repo.unclearFindings.length} | ${scoreText(repo.scores)} |`
+      `| ${repo.repo} | ${repo.status}${repo.skipReason ? ` (${repo.skipReason})` : ""} | ${repo.stats.filesScanned} | ${repo.stats.entrypointsFound} | ${repo.stats.importEdges} | ${repo.stats.reachableHighRiskSurfaces} | ${repo.missedSignals.length} | ${bucketCounts(repo.stats.unresolvedImportBuckets)} | ${repo.usefulFindings.length}/${repo.noisyFindings.length}/${repo.unclearFindings.length} | ${scoreText(repo.scores)} |`
     );
   }
   lines.push("");
+  lines.push("## unresolved import buckets");
+  lines.push("");
+  for (const repo of report.repos) {
+    if (repo.status !== "scanned") continue;
+    lines.push(`### ${repo.repo}`);
+    lines.push("");
+    lines.push(`total unresolved non-relative imports: ${repo.stats.unresolvedNonRelativeImports}`);
+    lines.push(`bucket counts: ${bucketCounts(repo.stats.unresolvedImportBuckets)}`);
+    for (const [bucket, value] of Object.entries(repo.stats.unresolvedImportBuckets ?? {})) {
+      const samples = value.samples ?? [];
+      if (samples.length === 0) continue;
+      lines.push("");
+      lines.push(`${bucket} samples:`);
+      for (const sample of samples.slice(0, 3)) {
+        lines.push(`- ${sample.specifier} from ${sample.importing_file}: ${sample.reason}`);
+      }
+    }
+    lines.push("");
+  }
   lines.push("## useful findings");
   lines.push("");
   renderFindingGroup(lines, report.repos, "usefulFindings");
@@ -723,6 +744,7 @@ function statsFromMap(map, stdout) {
     aliasImportsResolved: Number(map?.scan?.alias_imports_resolved ?? 0),
     workspaceImportsResolved: Number(map?.scan?.workspace_imports_resolved ?? 0),
     unresolvedNonRelativeImports: Number(map?.scan?.unresolved_non_relative_imports ?? 0),
+    unresolvedImportBuckets: normalizeUnresolvedImportBuckets(map?.scan?.unresolved_import_buckets ?? map?.import_graph?.unresolved_import_buckets),
     reachableHighRiskSurfaces: surfaces.filter((surface) => surface.reachable_from_entrypoint && surface.risk?.length > 0).length,
     unreachableHighRiskLookingSurfaces: surfaces.filter((surface) => !surface.reachable_from_entrypoint && surface.risk?.length > 0).length,
     docsTestsConfigSurfaces: surfaces.filter((surface) => isDocTestConfig(surface.path, surface)).length
@@ -742,6 +764,7 @@ function emptyStats() {
     aliasImportsResolved: 0,
     workspaceImportsResolved: 0,
     unresolvedNonRelativeImports: 0,
+    unresolvedImportBuckets: normalizeUnresolvedImportBuckets(),
     reachableHighRiskSurfaces: 0,
     unreachableHighRiskLookingSurfaces: 0,
     docsTestsConfigSurfaces: 0
@@ -960,6 +983,28 @@ function matchFirst(text, regex) {
 
 function sum(values, select) {
   return values.reduce((total, value) => total + Number(select(value) ?? 0), 0);
+}
+
+function normalizeUnresolvedImportBuckets(raw = {}) {
+  const names = ["external_dependency_like", "workspace_package_like", "alias_like", "unknown"];
+  return Object.fromEntries(
+    names.map((name) => [
+      name,
+      {
+        count: Number(raw?.[name]?.count ?? 0),
+        samples: Array.isArray(raw?.[name]?.samples) ? raw[name].samples.slice(0, 12) : []
+      }
+    ])
+  );
+}
+
+function actionableUnresolvedCount(buckets = {}) {
+  return ["workspace_package_like", "alias_like", "unknown"].reduce((total, name) => total + Number(buckets?.[name]?.count ?? 0), 0);
+}
+
+function bucketCounts(buckets = {}) {
+  const normalized = normalizeUnresolvedImportBuckets(buckets);
+  return `external ${normalized.external_dependency_like.count}, workspace ${normalized.workspace_package_like.count}, alias ${normalized.alias_like.count}, unknown ${normalized.unknown.count}`;
 }
 
 function tail(text, maxLines = 24, maxChars = 5000) {
