@@ -120,9 +120,11 @@ function renderClassificationReport(report) {
   lines.push("");
 
   report.map_drift.forEach((finding, index) => {
-    lines.push(`### ${index + 1}. ${finding.path}`);
+    lines.push(`### ${index + 1}. ${finding.title ?? finding.path}`);
     lines.push("");
+    lines.push(`file: ${finding.path}`);
     lines.push(`severity: ${finding.severity}`);
+    lines.push(`type: ${finding.finding_type}`);
     lines.push(`label: ${finding.label}`);
     lines.push(`risk: ${finding.risk.length ? finding.risk.join(", ") : "none"}`);
     lines.push("");

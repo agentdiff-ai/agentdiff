@@ -1,0 +1,93 @@
+{
+  "version": "0.1",
+  "generated_at": "2026-06-19T18:05:32.898Z",
+  "repo": "agentdiff",
+  "agents": [
+    {
+      "id": "supportagent",
+      "display_name": "supportagent",
+      "entrypoints": [
+        "examples/demo-support-agent/src/supportAgent.js"
+      ],
+      "prompts": [],
+      "tools": [],
+      "schemas": [],
+      "state": [
+        {
+          "path": "examples/demo-support-agent/src/supportAgent.js",
+          "risk": [
+            "state_mutation",
+            "external_side_effect"
+          ]
+        }
+      ],
+      "model_configs": [],
+      "retrievers": [],
+      "memory": [],
+      "risk": [
+        "state_mutation",
+        "external_side_effect"
+      ],
+      "evidence": [
+        {
+          "type": "classifier",
+          "path": "examples/demo-support-agent/src/supportAgent.js",
+          "detail": "path suggests agent entrypoint or orchestration code",
+          "confidence": 0.72
+        },
+        {
+          "type": "classifier",
+          "path": "examples/demo-support-agent/src/supportAgent.js",
+          "detail": "name or content suggests state mutation",
+          "confidence": 0.72
+        },
+        {
+          "type": "classifier",
+          "path": "examples/demo-support-agent/src/supportAgent.js",
+          "detail": "name or content suggests external side effect",
+          "confidence": 0.72
+        }
+      ]
+    }
+  ],
+  "surfaces": [
+    {
+      "path": "examples/demo-support-agent/src/supportAgent.js",
+      "label": "agent_entrypoint",
+      "confidence": 0.72,
+      "risk": [
+        "state_mutation",
+        "external_side_effect"
+      ],
+      "evidence": [
+        "path suggests agent entrypoint or orchestration code",
+        "name or content suggests state mutation",
+        "name or content suggests external side effect"
+      ],
+      "recommended_check_depth": "standard"
+    }
+  ],
+  "evidence": [
+    {
+      "type": "classifier",
+      "path": "examples/demo-support-agent/src/supportAgent.js",
+      "label": "agent_entrypoint",
+      "detail": "path suggests agent entrypoint or orchestration code",
+      "confidence": 0.72
+    },
+    {
+      "type": "classifier",
+      "path": "examples/demo-support-agent/src/supportAgent.js",
+      "label": "agent_entrypoint",
+      "detail": "name or content suggests state mutation",
+      "confidence": 0.72
+    },
+    {
+      "type": "classifier",
+      "path": "examples/demo-support-agent/src/supportAgent.js",
+      "label": "agent_entrypoint",
+      "detail": "name or content suggests external side effect",
+      "confidence": 0.72
+    }
+  ]
+}

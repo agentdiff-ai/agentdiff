@@ -93,12 +93,14 @@ async function classify({ files, out }) {
   }
 
   const outDir = path.resolve(process.cwd(), out);
+  const agentMap = readAgentMapIfPresent();
   const report = buildClassificationReport({
     repo: path.basename(process.cwd()),
     files: files.map((file) => ({
       filePath: file.filePath,
       content: readTextIfPresent(path.resolve(process.cwd(), file.filePath)),
-      diffText: file.diffText
+      diffText: file.diffText,
+      agentMap
     }))
   });
   const markdown = renderMarkdownReport(report);
@@ -232,6 +234,12 @@ function readTextIfPresent(filePath) {
   const stat = fs.statSync(filePath);
   if (!stat.isFile() || stat.size > 200_000) return "";
   return fs.readFileSync(filePath, "utf8");
+}
+
+function readAgentMapIfPresent() {
+  const mapPath = path.resolve(process.cwd(), ".agentdiff", "map.json");
+  if (!fs.existsSync(mapPath)) return null;
+  return readJson(mapPath);
 }
 
 function writeFileSafe(filePath, content, { force }) {

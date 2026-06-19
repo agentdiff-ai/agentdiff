@@ -53,6 +53,7 @@ export function classifyChangedFile({ filePath, content = "" }) {
   const normalized = filePath.replaceAll("\\", "/").toLowerCase();
   const basename = normalized.split("/").pop() ?? normalized;
   const lowerContent = content.toLowerCase();
+  const exportedFunctions = extractExportedFunctionNames(content);
   const evidence = [];
   const risk = [];
   let label = "not_agent_related";
@@ -71,10 +72,18 @@ export function classifyChangedFile({ filePath, content = "" }) {
     evidence.push("path suggests prompt or instruction surface");
   }
 
-  if (matchesAny(normalized, ["/tools/", "/tool/"]) || matchesAny(basename, ["tool", "function", "action"])) {
+  if (
+    matchesAny(normalized, ["/tools/", "/tool/"]) ||
+    matchesAny(basename, ["tool", "function", "action"]) ||
+    exportedFunctions.some(isHighRiskCall)
+  ) {
     label = "tool_implementation";
     confidence = Math.max(confidence, 0.76);
-    evidence.push("path suggests tool implementation");
+    evidence.push(
+      exportedFunctions.some(isHighRiskCall)
+        ? `exports high-risk function ${exportedFunctions.find(isHighRiskCall)}`
+        : "path suggests tool implementation"
+    );
   }
 
   if (matchesAny(basename, ["schema", "zod", "jsonschema"])) {
@@ -112,10 +121,22 @@ export function classifyChangedFile({ filePath, content = "" }) {
     evidence.push("name or content suggests state mutation");
   }
 
-  if (/\b(refund|charge|invoice|email|send|publish)\b/.test(normalized + "\n" + lowerContent)) {
+  const exportedHighRiskFunction = exportedFunctions.find(isHighRiskCall);
+  if (exportedHighRiskFunction) {
+    risk.push("state_mutation");
+    evidence.push(`exported function ${exportedHighRiskFunction} suggests state mutation`);
+  }
+
+  if (/\b(refund|charge|invoice|email|send|publish|recipientemail|customerid|amountusd|payment|accountid)\b/.test(normalized + "\n" + lowerContent)) {
     risk.push("external_side_effect");
     recommendedCheckDepth = "standard";
     evidence.push("name or content suggests external side effect");
+  }
+
+  const sensitiveArgs = extractSensitiveArgumentNames(content);
+  if (sensitiveArgs.length > 0) {
+    confidence = Math.max(confidence, 0.82);
+    evidence.push(`function args include ${sensitiveArgs.join(", ")}`);
   }
 
   if (label !== "not_agent_related" && risk.length === 0) {
@@ -139,17 +160,10 @@ export function classifyChangedFile({ filePath, content = "" }) {
 export function buildClassificationReport({ files, repo = process.cwd() }) {
   const changedSurfaces = files.map((file) => classifyChangedFile(file));
   const diffAwareFindings = files.flatMap((file) => buildDiffAwareFindings(file));
+  const mappedPaths = collectMappedSurfacePaths(files[0]?.agentMap);
   const mapDrift = changedSurfaces
     .filter((surface) => surface.label !== "not_agent_related")
-    .map((surface) => ({
-      finding_type: "changed_agent_surface",
-      severity: surface.risk.includes("external_side_effect") ? "high" : "medium",
-      path: surface.path,
-      label: surface.label,
-      risk: surface.risk,
-      evidence: surface.evidence,
-      recommendation: recommendationForSurface(surface)
-    }));
+    .flatMap((surface) => buildMapDriftFinding({ surface, mappedPaths }));
 
   const status = statusFromFindings([...diffAwareFindings, ...mapDrift]);
 
@@ -385,6 +399,76 @@ function recommendationForSurface(surface) {
   return "Review whether this surface belongs in .agentdiff/map.json.";
 }
 
+function buildMapDriftFinding({ surface, mappedPaths }) {
+  const isMapped = mappedPaths.has(normalizePath(surface.path));
+  const severity = surface.risk.includes("external_side_effect") ? "high" : "medium";
+
+  if (mappedPaths.size > 0 && !isMapped) {
+    return [
+      {
+        finding_type: "new_unmapped_agent_surface",
+        severity,
+        title: titleForUnmappedSurface(surface),
+        path: surface.path,
+        label: surface.label,
+        risk: surface.risk,
+        evidence: surface.evidence,
+        recommendation: recommendationForUnmappedSurface(surface)
+      }
+    ];
+  }
+
+  return [
+    {
+      finding_type: "changed_agent_surface",
+      severity,
+      title: "Mapped agent surface changed",
+      path: surface.path,
+      label: surface.label,
+      risk: surface.risk,
+      evidence: surface.evidence,
+      recommendation: recommendationForSurface(surface)
+    }
+  ];
+}
+
+function titleForUnmappedSurface(surface) {
+  if (surface.label === "tool_implementation" && surface.risk.includes("external_side_effect")) {
+    return `New unmapped high-risk tool: ${surface.path}`;
+  }
+
+  return `New unmapped agent surface: ${surface.path}`;
+}
+
+function recommendationForUnmappedSurface(surface) {
+  if (surface.label === "tool_implementation") {
+    return "Add this tool to .agentdiff/map.json and create a scenario before merge.";
+  }
+
+  return "Add this surface to .agentdiff/map.json or ignore it with a reason and expiration.";
+}
+
+function collectMappedSurfacePaths(agentMap) {
+  const paths = new Set();
+  if (!agentMap) return paths;
+
+  for (const surface of agentMap.surfaces ?? []) {
+    if (surface.path) paths.add(normalizePath(surface.path));
+  }
+
+  for (const agent of agentMap.agents ?? []) {
+    for (const entrypoint of agent.entrypoints ?? []) paths.add(normalizePath(entrypoint));
+    for (const collectionName of ["prompts", "tools", "schemas", "state", "model_configs", "retrievers", "memory"]) {
+      for (const item of agent[collectionName] ?? []) {
+        if (typeof item === "string") paths.add(normalizePath(item));
+        if (item?.path) paths.add(normalizePath(item.path));
+      }
+    }
+  }
+
+  return paths;
+}
+
 function buildDiffAwareFindings(file) {
   if (!file.diffText) return [];
 
@@ -438,6 +522,37 @@ function extractCallsFromCodeLine(line) {
   return calls;
 }
 
+function extractExportedFunctionNames(content) {
+  const names = [];
+  const regex = /\bexport\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g;
+  let match;
+
+  while ((match = regex.exec(content)) !== null) {
+    names.push(match[1]);
+  }
+
+  return unique(names);
+}
+
+function extractSensitiveArgumentNames(content) {
+  const sensitiveWords = ["email", "amount", "customerid", "invoiceid", "payment", "accountid"];
+  const args = [];
+  const functionSignatureRegex = /\bfunction\s+[A-Za-z_$][\w$]*\s*\(([^)]*)\)/g;
+  let match;
+
+  while ((match = functionSignatureRegex.exec(content)) !== null) {
+    const identifiers = match[1].match(/[A-Za-z_$][\w$]*/g) ?? [];
+    for (const identifier of identifiers) {
+      const normalized = identifier.toLowerCase();
+      if (sensitiveWords.some((word) => normalized.includes(word))) {
+        args.push(identifier);
+      }
+    }
+  }
+
+  return unique(args);
+}
+
 function isHighRiskCall(call) {
   const normalized = call.toLowerCase();
   return HIGH_RISK_CALL_WORDS.some((word) => normalized.includes(word));
@@ -462,6 +577,10 @@ function reasonForDiffAwareFinding({ addedHighRiskCalls, removedSaferCalls }) {
 
 function unique(values) {
   return [...new Set(values)];
+}
+
+function normalizePath(filePath) {
+  return filePath.replaceAll("\\", "/");
 }
 
 function relatedPaths(surfaces, label) {
