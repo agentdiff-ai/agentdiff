@@ -213,14 +213,19 @@ Unreachable `.claude/skills/**` and `.agents/skills/**` files were also flagged 
 
 ## Next Precision Improvements
 
-1. Explain findings better: show path, reachability chain, risk words, imported-by evidence, and why the surface is actionable or informational.
-2. Add suppressions in `agentdiff.yml` for docs, tests, generated areas, and intentional surfaces.
-3. Resolve TypeScript source files imported with `.js` specifiers.
-4. Parse framework config entrypoints such as `langgraph.json`.
-5. Mark or ignore type-only imports when computing behavior reachability.
-6. Split surface types for docs, tests, config, persistence, browser tools, and runtime agent entrypoints.
-7. Reduce broad high-risk verbs such as `create` unless supported by stronger context.
+1. Resolve TypeScript source files imported with `.js` specifiers.
+2. Parse framework config entrypoints such as `langgraph.json`.
+3. Mark or ignore type-only imports when computing behavior reachability.
+4. Further split surface types for docs, tests, config, persistence, browser tools, and runtime agent entrypoints.
+5. Continue reducing broad high-risk verbs such as `create` unless supported by stronger context.
+
+Completed since this review:
+
+- Finding explanations now show path, reachability chain, risk words, imported-by evidence, and confidence reason.
+- `agentdiff.yml` suppressions now support path globs with reason/expiration and visible suppressed findings.
+- Docs/tests/config categories are downranked unless supported by stronger reachability evidence.
+- `create*` names no longer imply high risk without stronger mutation context.
 
 ## Product Read
 
-The bakeoff supports the current direction: import graph reachability makes the scanner more useful than path/name heuristics alone. The next useful product work is not another broad detector; it is better explanations and suppressions so users can understand, accept, or silence findings without losing trust.
+The bakeoff supports the current direction: import graph reachability makes the scanner more useful than path/name heuristics alone. The next useful product work is targeted precision, especially `.js` specifier to `.ts` source resolution and framework config entrypoints.

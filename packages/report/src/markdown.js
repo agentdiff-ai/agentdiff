@@ -38,6 +38,7 @@ export function renderMarkdownReport(report) {
       lines.push(`- ${item}`);
     }
     lines.push("");
+    renderExplanation(lines, finding);
     lines.push(`recommendation: ${finding.recommendation}`);
     lines.push("");
   });
@@ -76,15 +77,26 @@ function renderClassificationReport(report) {
   lines.push(`changed surfaces: ${report.changed_surfaces.length}`);
   lines.push(`diff-aware findings: ${report.diff_aware_findings.length}`);
   lines.push(`map drift findings: ${report.map_drift.length}`);
+  lines.push(`suppressed findings: ${report.suppressed_findings?.length ?? 0}`);
   lines.push(`estimated cost: $${report.cost.estimated_cost_usd.toFixed(4)}`);
   lines.push(`actual cost: $${report.cost.actual_cost_usd.toFixed(4)}`);
   lines.push("");
 
+  if ((report.suppression_warnings ?? []).length > 0) {
+    lines.push("## suppression warnings");
+    lines.push("");
+    for (const warning of report.suppression_warnings) {
+      lines.push(`- ${warning}`);
+    }
+    lines.push("");
+  }
+
   if (report.diff_aware_findings.length === 0 && report.map_drift.length === 0) {
     lines.push("## top findings");
     lines.push("");
-    lines.push("No agent-related changed surfaces detected.");
+    lines.push("No unsuppressed agent-related changed surfaces detected.");
     lines.push("");
+    renderSuppressedFindings(lines, report);
     return lines.join("\n");
   }
 
@@ -124,6 +136,8 @@ function renderClassificationReport(report) {
         lines.push(`- ${item}`);
       }
       lines.push("");
+      renderExplanation(lines, finding);
+      renderSuggestedSuppression(lines, finding);
       lines.push(`recommendation: ${finding.recommendation}`);
       lines.push("");
     });
@@ -149,6 +163,8 @@ function renderClassificationReport(report) {
       lines.push(`- ${item}`);
     }
     lines.push("");
+    renderExplanation(lines, finding);
+    renderSuggestedSuppression(lines, finding);
     lines.push(`recommendation: ${finding.recommendation}`);
     lines.push("");
   });
@@ -157,9 +173,68 @@ function renderClassificationReport(report) {
   lines.push("");
   for (const surface of report.changed_surfaces) {
     const reachable = typeof surface.reachable_from_entrypoint === "boolean" ? `, reachable=${surface.reachable_from_entrypoint ? "yes" : "no"}` : "";
-    lines.push(`- ${surface.path}: ${surface.label} (${surface.confidence}${reachable})`);
+    const suppressed = surface.suppressed ? ", suppressed=yes" : "";
+    lines.push(`- ${surface.path}: ${surface.label}/${surface.surface_category ?? "uncategorized"} (${surface.confidence}${reachable}${suppressed})`);
   }
   lines.push("");
 
+  renderSuppressedFindings(lines, report);
+
   return lines.join("\n");
+}
+
+function renderExplanation(lines, finding) {
+  const explanation = finding.explanation;
+  if (!explanation) return;
+  lines.push("why agentdiff flagged this:");
+  for (const item of explanation.why_flagged ?? []) {
+    lines.push(`- ${item}`);
+  }
+  if ((explanation.reachability_chain ?? []).length > 0) {
+    lines.push("");
+    lines.push(`reachable from: ${explanation.reachability_chain.join(" -> ")}`);
+  }
+  if ((finding.imported_by ?? []).length > 0) {
+    lines.push("");
+    lines.push("imported by:");
+    for (const importer of finding.imported_by.slice(0, 5)) {
+      lines.push(`- ${importer.path}: ${importer.import_statement}`);
+    }
+  }
+  if ((explanation.risk_evidence ?? []).length > 0) {
+    lines.push("");
+    lines.push("risk evidence:");
+    for (const item of explanation.risk_evidence) {
+      lines.push(`- ${item}`);
+    }
+  }
+  lines.push("");
+  lines.push(`confidence reason: ${explanation.confidence_reason}`);
+  lines.push("");
+}
+
+function renderSuggestedSuppression(lines, finding) {
+  lines.push("suggested suppression if intentional:");
+  lines.push("");
+  lines.push("```yaml");
+  lines.push("ignore:");
+  lines.push(`  - path: "${finding.path}"`);
+  lines.push('    reason: "intentional agent-relevant surface, covered by review"');
+  lines.push('    expires: "2026-07-31"');
+  lines.push("```");
+  lines.push("");
+}
+
+function renderSuppressedFindings(lines, report) {
+  const suppressed = report.suppressed_findings ?? [];
+  if (suppressed.length === 0) return;
+  lines.push("## suppressed findings");
+  lines.push("");
+  for (const finding of suppressed) {
+    lines.push(`- ${finding.path}: ${finding.title ?? finding.finding_type} (${finding.severity})`);
+    lines.push(`  suppressed by: ${finding.suppression?.path}`);
+    lines.push(`  reason: ${finding.suppression?.reason}`);
+    if (finding.suppression?.expires) lines.push(`  expires: ${finding.suppression.expires}`);
+  }
+  lines.push("");
 }

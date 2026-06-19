@@ -61,6 +61,7 @@ export function classifyChangedFile({ filePath, content = "" }) {
   let label = "not_agent_related";
   let confidence = 0.15;
   let recommendedCheckDepth = "classify";
+  const context = `${normalized}\n${lowerContent}`;
 
   if (matchesAny(basename, ["agent", "assistant", "workflow", "orchestrator"]) || /export\s+async\s+function\s+run.*agent/i.test(content)) {
     label = "agent_entrypoint";
@@ -77,13 +78,13 @@ export function classifyChangedFile({ filePath, content = "" }) {
   if (
     matchesAny(normalized, ["/tools/", "/tool/"]) ||
     matchesAny(basename, ["tool", "function", "action"]) ||
-    exportedFunctions.some(isHighRiskCall)
+    exportedFunctions.some((name) => isHighRiskCall(name, context))
   ) {
     label = "tool_implementation";
     confidence = Math.max(confidence, 0.76);
     evidence.push(
-      exportedFunctions.some(isHighRiskCall)
-        ? `exports high-risk function ${exportedFunctions.find(isHighRiskCall)}`
+      exportedFunctions.some((name) => isHighRiskCall(name, context))
+        ? `exports high-risk function ${exportedFunctions.find((name) => isHighRiskCall(name, context))}`
         : "path suggests tool implementation"
     );
   }
@@ -118,12 +119,12 @@ export function classifyChangedFile({ filePath, content = "" }) {
     evidence.push("content contains tool/schema pattern");
   }
 
-  if (/\b(delete|refund|charge|send|publish|close|update|create|write)\b/.test(normalized + "\n" + lowerContent)) {
+  if (/\b(delete|refund|charge|send|publish|close|update|write|grant|revoke|approve|reject)\b/.test(context) || /\bcreate\b/.test(context) && hasStrongMutationContext(context)) {
     risk.push("state_mutation");
     evidence.push("name or content suggests state mutation");
   }
 
-  const exportedHighRiskFunction = exportedFunctions.find(isHighRiskCall);
+  const exportedHighRiskFunction = exportedFunctions.find((name) => isHighRiskCall(name, context));
   if (exportedHighRiskFunction) {
     risk.push("state_mutation");
     evidence.push(`exported function ${exportedHighRiskFunction} suggests state mutation`);
@@ -152,6 +153,7 @@ export function classifyChangedFile({ filePath, content = "" }) {
   return {
     path: filePath,
     label,
+    surface_category: surfaceCategoryFor({ filePath, label, content }),
     confidence: Number(confidence.toFixed(2)),
     risk: [...new Set(risk)],
     evidence: [...new Set(evidence)],
@@ -159,15 +161,23 @@ export function classifyChangedFile({ filePath, content = "" }) {
   };
 }
 
-export function buildClassificationReport({ files, repo = process.cwd() }) {
-  const changedSurfaces = files.map((file) => applyMappedSurfaceMetadata(classifyChangedFile(file), file.agentMap));
-  const diffAwareFindings = files.flatMap((file) => buildDiffAwareFindings(file));
+export function buildClassificationReport({ files, repo = process.cwd(), suppressions = [], now = new Date() }) {
+  const suppressionState = normalizeSuppressions(suppressions, now);
+  const changedSurfaces = files
+    .map((file) => applyMappedSurfaceMetadata(classifyChangedFile(file), file.agentMap))
+    .map((surface) => attachSurfaceExplanation(surface))
+    .map((surface) => applySuppressionToItem(surface, suppressionState));
+  const diffAwareFindings = files.flatMap((file) => buildDiffAwareFindings(file)).map((finding) => applySuppressionToItem(finding, suppressionState));
   const mappedPaths = collectMappedSurfacePaths(files[0]?.agentMap);
   const mapDrift = changedSurfaces
     .filter((surface) => surface.label !== "not_agent_related")
-    .flatMap((surface) => buildMapDriftFinding({ surface, mappedPaths }));
+    .flatMap((surface) => buildMapDriftFinding({ surface, mappedPaths }))
+    .map((finding) => applySuppressionToItem(finding, suppressionState));
+  const activeDiffAwareFindings = diffAwareFindings.filter((finding) => !finding.suppressed);
+  const activeMapDrift = mapDrift.filter((finding) => !finding.suppressed);
+  const suppressedFindings = [...diffAwareFindings, ...mapDrift].filter((finding) => finding.suppressed);
 
-  const status = statusFromFindings([...diffAwareFindings, ...mapDrift]);
+  const status = statusFromFindings([...activeDiffAwareFindings, ...activeMapDrift]);
 
   return {
     run_id: new Date().toISOString().replace(/[:.]/g, "-"),
@@ -175,8 +185,10 @@ export function buildClassificationReport({ files, repo = process.cwd() }) {
     mode: "classify",
     status,
     changed_surfaces: changedSurfaces,
-    diff_aware_findings: diffAwareFindings,
-    map_drift: mapDrift,
+    diff_aware_findings: activeDiffAwareFindings,
+    map_drift: activeMapDrift,
+    suppressed_findings: suppressedFindings,
+    suppression_warnings: suppressionState.warnings,
     behavior_findings: [],
     cost: {
       estimated_cost_usd: 0,
@@ -222,7 +234,8 @@ export function buildAgentMap({ files, repo = process.cwd(), entrypointGlobs = [
   importGraph.reachable_files = [...reachability.reachableFiles].sort();
 
   const surfaces = initialSurfaces
-    .map((surface) => applyReachability(surface, { reachability, importedBy, entrypoints }))
+    .map((surface) => applyReachability(surface, { reachability, importedBy, entrypoints, edges: importGraph.edges }))
+    .map((surface) => attachSurfaceExplanation(surface))
     .filter((surface) => surface.label !== "not_agent_related");
 
   const agents = surfaces
@@ -280,14 +293,15 @@ export function analyzeTracePair({ baseTrace, headTrace }) {
   findings.push(...compareState(baseTrace.scenario_id, baseTrace.state_after, headTrace.state_after));
   findings.push(...compareCost(baseTrace.scenario_id, baseTrace, headTrace));
 
-  const status = statusFromFindings(findings);
+  const explainedFindings = findings.map(attachGenericFindingExplanation);
+  const status = statusFromFindings(explainedFindings);
 
   return {
     run_id: new Date().toISOString().replace(/[:.]/g, "-"),
     mode: "base_head_light",
     status,
     scenario_id: headTrace.scenario_id ?? baseTrace.scenario_id,
-    behavior_findings: findings,
+    behavior_findings: explainedFindings,
     traces: {
       base: summarizeTrace(baseTrace),
       head: summarizeTrace(headTrace)
@@ -471,6 +485,140 @@ function compareCodingAgentBehavior(baseTrace, headTrace) {
   ];
 }
 
+function normalizeSuppressions(suppressions = [], now = new Date()) {
+  const today = now.toISOString().slice(0, 10);
+  const warnings = [];
+  const active = [];
+
+  for (const suppression of suppressions ?? []) {
+    if (!suppression?.path) continue;
+    const normalized = {
+      path: normalizePath(suppression.path),
+      reason: suppression.reason,
+      expires: suppression.expires
+    };
+
+    if (!normalized.reason) {
+      warnings.push(`ignore ${normalized.path} is missing required reason`);
+      continue;
+    }
+
+    if (!normalized.expires) {
+      warnings.push(`ignore ${normalized.path} is missing expires`);
+    } else if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized.expires)) {
+      warnings.push(`ignore ${normalized.path} has invalid expires date ${normalized.expires}`);
+    } else if (normalized.expires < today) {
+      warnings.push(`ignore ${normalized.path} expired on ${normalized.expires}`);
+      continue;
+    }
+
+    active.push(normalized);
+  }
+
+  return { active, warnings };
+}
+
+function applySuppressionToItem(item, suppressionState) {
+  const suppression = suppressionState.active.find((candidate) => globToRegex(candidate.path).test(normalizePath(item.path ?? "")));
+  if (!suppression) return item;
+  return {
+    ...item,
+    suppressed: true,
+    suppression: {
+      path: suppression.path,
+      reason: suppression.reason,
+      expires: suppression.expires
+    }
+  };
+}
+
+function attachSurfaceExplanation(surface) {
+  return {
+    ...surface,
+    explanation: buildSurfaceExplanation(surface)
+  };
+}
+
+function buildSurfaceExplanation(surface) {
+  const whyFlagged = [];
+  if (surface.reachable_from_entrypoint) {
+    whyFlagged.push(`reachable from agent entrypoint ${(surface.reachable_entrypoints ?? []).join(", ") || surface.path}`);
+  }
+  for (const importer of surface.imported_by ?? []) {
+    whyFlagged.push(`imported by ${importer.path}`);
+  }
+  whyFlagged.push(`classified as ${surface.label}`);
+  if (surface.surface_category) whyFlagged.push(`surface category: ${surface.surface_category}`);
+
+  const riskEvidence = riskEvidenceForSurface(surface);
+  const reachabilityChain = surface.reachability_chain?.length
+    ? surface.reachability_chain
+    : surface.reachable_from_entrypoint
+      ? [surface.reachable_entrypoints?.[0], surface.path].filter(Boolean)
+      : [];
+
+  return {
+    why_flagged: unique([...whyFlagged, ...surface.evidence.slice(0, 4)]),
+    reachability_chain: unique(reachabilityChain),
+    risk_evidence: riskEvidence,
+    confidence_reason: confidenceReasonForSurface(surface)
+  };
+}
+
+function riskEvidenceForSurface(surface) {
+  const items = [];
+  for (const item of surface.evidence ?? []) {
+    if (/(risk|mutation|side effect|args include|high-risk|send|email|refund|charge|delete|close|write|update|recipient|amount|customer)/i.test(item)) {
+      items.push(item);
+    }
+  }
+  if ((surface.risk ?? []).length > 0) items.push(`risk tags: ${surface.risk.join(", ")}`);
+  return unique(items);
+}
+
+function confidenceReasonForSurface(surface) {
+  if (surface.confidence >= 0.85 && surface.reachable_from_entrypoint) {
+    return `high because this surface is reachable from an entrypoint and has ${surface.label} evidence`;
+  }
+  if (surface.confidence <= 0.45 && isLowSignalCategory(surface.surface_category)) {
+    return `low because this looks like ${surface.surface_category} and is not proven reachable from runtime agent code`;
+  }
+  if (surface.confidence >= 0.75) {
+    return `medium-high because this surface has ${surface.label} signals`;
+  }
+  return "low until agentdiff sees stronger runtime, tool, or reachability evidence";
+}
+
+function explanationForDiffAwareFinding(finding) {
+  return {
+    why_flagged: unique([
+      `classified as ${finding.finding_type}`,
+      ...finding.added_high_risk_calls.map((call) => `added high-risk call: ${call}`),
+      ...finding.removed_safer_calls.map((call) => `removed safer/guardrail call: ${call}`)
+    ]),
+    reachability_chain: [finding.path],
+    risk_evidence: finding.evidence,
+    confidence_reason: finding.severity === "high" ? "high because this diff adds high-risk calls inside a changed surface" : "medium because this diff changes guardrail behavior"
+  };
+}
+
+function explanationForFindingFromSurface(surface) {
+  return surface.explanation ?? buildSurfaceExplanation(surface);
+}
+
+function attachGenericFindingExplanation(finding) {
+  if (finding.explanation) return finding;
+  return {
+    ...finding,
+    explanation: {
+      why_flagged: unique([`classified as ${finding.finding_type}`, finding.reason, ...(finding.evidence ?? []).slice(0, 3)].filter(Boolean)),
+      reachability_chain: finding.path ? [finding.path] : [],
+      risk_evidence: (finding.evidence ?? []).filter((item) => /(risk|tool|state|cost|confirmation|test|changed)/i.test(item)),
+      confidence_reason: `severity ${finding.severity} because the recorded trace evidence matched ${finding.finding_type}`
+    }
+  };
+}
+
 function samePathSet(left, right) {
   if (left.length !== right.length) return false;
   const leftSet = new Set(left.map((item) => item.replaceAll("\\", "/")));
@@ -502,11 +650,14 @@ function buildMapDriftFinding({ surface, mappedPaths }) {
         title: titleForUnmappedSurface(surface),
         path: surface.path,
         label: surface.label,
+        surface_category: surface.surface_category,
         risk: surface.risk,
         reachable_from_entrypoint: surface.reachable_from_entrypoint,
         reachable_entrypoints: surface.reachable_entrypoints,
+        reachability_chain: surface.reachability_chain,
         imported_by: surface.imported_by,
         evidence: surface.evidence,
+        explanation: explanationForFindingFromSurface(surface),
         recommendation: recommendationForUnmappedSurface(surface)
       }
     ];
@@ -519,11 +670,14 @@ function buildMapDriftFinding({ surface, mappedPaths }) {
       title: "Mapped agent surface changed",
       path: surface.path,
       label: surface.label,
+      surface_category: surface.surface_category,
       risk: surface.risk,
       reachable_from_entrypoint: surface.reachable_from_entrypoint,
       reachable_entrypoints: surface.reachable_entrypoints,
+      reachability_chain: surface.reachability_chain,
       imported_by: surface.imported_by,
       evidence: surface.evidence,
+      explanation: explanationForFindingFromSurface(surface),
       recommendation: recommendationForSurface(surface)
     }
   ];
@@ -538,9 +692,11 @@ function applyMappedSurfaceMetadata(surface, agentMap) {
   }
   return {
     ...surface,
+    surface_category: mapped.surface_category ?? surface.surface_category,
     evidence: unique(evidence),
     reachable_from_entrypoint: mapped.reachable_from_entrypoint ?? surface.reachable_from_entrypoint ?? false,
     reachable_entrypoints: mapped.reachable_entrypoints ?? surface.reachable_entrypoints ?? [],
+    reachability_chain: mapped.reachability_chain ?? surface.reachability_chain ?? [],
     imported_by: mapped.imported_by ?? surface.imported_by ?? []
   };
 }
@@ -594,7 +750,7 @@ function buildDiffAwareFindings(file) {
   if (!file.diffText) return [];
 
   const calls = extractCallsFromUnifiedDiff(file.diffText);
-  const addedHighRiskCalls = calls.added_calls.filter(isHighRiskCall);
+  const addedHighRiskCalls = calls.added_calls.filter((call) => isHighRiskCall(call));
   const removedSaferCalls = calls.removed_calls.filter(isSaferCall);
 
   if (calls.added_calls.length === 0 && calls.removed_calls.length === 0) {
@@ -623,6 +779,14 @@ function buildDiffAwareFindings(file) {
       added_high_risk_calls: addedHighRiskCalls,
       removed_safer_calls: removedSaferCalls,
       evidence,
+      explanation: explanationForDiffAwareFinding({
+        finding_type: "behavior_surface_change",
+        path: file.filePath,
+        severity,
+        added_high_risk_calls: addedHighRiskCalls,
+        removed_safer_calls: removedSaferCalls,
+        evidence
+      }),
       reason: reasonForDiffAwareFinding({ addedHighRiskCalls, removedSaferCalls }),
       recommendation: "Review before merge. Add confirmation, policy checks, or an approval scenario if this behavior is intended."
     }
@@ -674,9 +838,53 @@ function extractSensitiveArgumentNames(content) {
   return unique(args);
 }
 
-function isHighRiskCall(call) {
+function isHighRiskCall(call, context = "") {
   const normalized = call.toLowerCase();
-  return HIGH_RISK_CALL_WORDS.some((word) => normalized.includes(word));
+  if (normalized.includes("create")) return hasStrongMutationContext(`${normalized}\n${context}`);
+  return HIGH_RISK_CALL_WORDS.filter((word) => word !== "create").some((word) => normalized.includes(word));
+}
+
+function hasStrongMutationContext(context) {
+  return /\b(tool|schema|state|store|database|db|write|delete|send|email|refund|charge|invoice|payment|customer|account|ticket|publish|approve|reject|grant|revoke|mutation)\b/.test(
+    context.toLowerCase()
+  );
+}
+
+function surfaceCategoryFor({ filePath, label, content = "" }) {
+  const normalized = normalizePath(filePath).toLowerCase();
+  const basename = normalized.split("/").pop() ?? normalized;
+  const lowerContent = content.toLowerCase();
+
+  if (isDocPath(normalized)) return "docs_example";
+  if (isTestPath(normalized) || normalized.includes("/__tests__/") || normalized.includes("/fixtures/") || normalized.includes("/fixture/")) return "test_fixture";
+  if (isConfigPath(normalized)) return "config_metadata";
+  if ((normalized.includes("browser") || lowerContent.includes("browser")) && (normalized.includes("/tools/") || label === "tool_implementation")) return "browser_tool";
+  if (matchesAny(normalized, ["checkpoint", "memory", "postgres", "store", "persistence"])) return "persistence";
+  if (matchesAny(basename, ["utils.ts", "utils.js", "util.ts", "util.js", "helpers.ts", "helpers.js"])) return "helper_utility";
+  if (label === "agent_entrypoint") return "runtime_agent";
+  if (label === "tool_implementation") return "tool_implementation";
+  return label === "not_agent_related" ? "unclassified" : label;
+}
+
+function isDocPath(normalizedPath) {
+  return normalizedPath.endsWith(".md") || normalizedPath.endsWith(".mdx") || normalizedPath.endsWith(".txt") || normalizedPath.includes("/docs/");
+}
+
+function isConfigPath(normalizedPath) {
+  const basename = normalizedPath.split("/").pop() ?? normalizedPath;
+  return (
+    basename === "package.json" ||
+    basename.endsWith(".config.ts") ||
+    basename.endsWith(".config.js") ||
+    basename.endsWith(".config.mjs") ||
+    basename.endsWith(".config.cjs") ||
+    basename.endsWith(".yml") ||
+    basename.endsWith(".yaml")
+  );
+}
+
+function isLowSignalCategory(category) {
+  return ["docs_example", "test_fixture", "config_metadata"].includes(category);
 }
 
 function isSaferCall(call) {
@@ -810,12 +1018,13 @@ function buildImportedBy(edges) {
   return importedBy;
 }
 
-function applyReachability(surface, { reachability, importedBy, entrypoints }) {
+function applyReachability(surface, { reachability, importedBy, entrypoints, edges = [] }) {
   const normalized = normalizePath(surface.path);
   const reachableFromEntrypoint = reachability.reachableFiles.has(normalized);
   const reachableEntryPoints = [...(reachability.reachableEntryPoints.get(normalized) ?? [])].sort();
   const directImporters = importedBy.get(normalized) ?? [];
   const isConfiguredOrInferredEntrypoint = entrypoints.includes(normalized);
+  const reachabilityChain = reachableEntryPoints.length > 0 ? findReachabilityChain(edges, reachableEntryPoints[0], normalized) : [];
   const evidence = [...surface.evidence];
   let confidence = surface.confidence;
   let recommendedCheckDepth = surface.recommended_check_depth;
@@ -836,6 +1045,12 @@ function applyReachability(surface, { reachability, importedBy, entrypoints }) {
     recommendedCheckDepth = "classify";
   }
 
+  if (isLowSignalCategory(surface.surface_category) && (!reachableFromEntrypoint || isConfiguredOrInferredEntrypoint) && !surface.configured_entrypoint) {
+    evidence.push(`${surface.surface_category} downranked until reachable from runtime agent code`);
+    confidence = Math.min(confidence, 0.45);
+    recommendedCheckDepth = "classify";
+  }
+
   return {
     ...surface,
     confidence: Number(confidence.toFixed(2)),
@@ -843,8 +1058,34 @@ function applyReachability(surface, { reachability, importedBy, entrypoints }) {
     recommended_check_depth: recommendedCheckDepth,
     reachable_from_entrypoint: reachableFromEntrypoint,
     reachable_entrypoints: reachableEntryPoints,
+    reachability_chain: reachabilityChain,
     imported_by: directImporters
   };
+}
+
+function findReachabilityChain(edges, start, target) {
+  if (!start || !target) return [];
+  if (start === target) return [target];
+  const adjacency = new Map();
+  for (const edge of edges) {
+    if (!adjacency.has(edge.from)) adjacency.set(edge.from, []);
+    adjacency.get(edge.from).push(edge.to);
+  }
+
+  const queue = [[start]];
+  const seen = new Set();
+  while (queue.length > 0) {
+    const chain = queue.shift();
+    const current = chain[chain.length - 1];
+    if (seen.has(current)) continue;
+    seen.add(current);
+    for (const next of adjacency.get(current) ?? []) {
+      const nextChain = [...chain, next];
+      if (next === target) return nextChain;
+      if (!seen.has(next)) queue.push(nextChain);
+    }
+  }
+  return [start, target].filter(Boolean);
 }
 
 function isDocLikeSurface(surface) {

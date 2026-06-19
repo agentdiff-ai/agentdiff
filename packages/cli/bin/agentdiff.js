@@ -126,8 +126,10 @@ async function runLiveExample({ example }) {
 async function classify({ files, out }) {
   const outDir = path.resolve(process.cwd(), out);
   const agentMap = readAgentMapIfPresent();
+  const suppressions = readSuppressionRules(process.cwd());
   const report = buildClassificationReport({
     repo: path.basename(process.cwd()),
+    suppressions,
     files: files.map((file) => ({
       filePath: file.filePath,
       content: readTextIfPresent(path.resolve(process.cwd(), file.filePath)),
@@ -144,6 +146,7 @@ async function classify({ files, out }) {
   console.log(`agentdiff status: ${report.status}`);
   console.log(`changed surfaces: ${report.changed_surfaces.length}`);
   console.log(`map drift findings: ${report.map_drift.length}`);
+  console.log(`suppressed findings: ${report.suppressed_findings.length}`);
   console.log(`report: ${path.join(outDir, "report.md")}`);
 }
 
@@ -541,9 +544,7 @@ function readTextWithLimit(filePath, expectedSize) {
 }
 
 function readEntrypointGlobs(rootDir) {
-  const configPath = ["agentdiff.yml", "agentdiff.yaml"]
-    .map((name) => path.join(rootDir, name))
-    .find((candidate) => fs.existsSync(candidate));
+  const configPath = findAgentdiffConfigPath(rootDir);
   if (!configPath) return [];
 
   const lines = fs.readFileSync(configPath, "utf8").split(/\r?\n/);
@@ -575,6 +576,74 @@ function readEntrypointGlobs(rootDir) {
   }
 
   return entrypoints;
+}
+
+function readSuppressionRules(rootDir) {
+  const configPath = findAgentdiffConfigPath(rootDir);
+  if (!configPath) return [];
+
+  const lines = fs.readFileSync(configPath, "utf8").split(/\r?\n/);
+  const suppressions = [];
+  let inIgnore = false;
+  let ignoreIndent = 0;
+  let current = null;
+
+  function finishCurrent() {
+    if (current) suppressions.push(current);
+    current = null;
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const indent = line.length - line.trimStart().length;
+
+    if (/^ignore:\s*$/.test(trimmed)) {
+      finishCurrent();
+      inIgnore = true;
+      ignoreIndent = indent;
+      continue;
+    }
+
+    if (!inIgnore) continue;
+
+    if (indent <= ignoreIndent && !trimmed.startsWith("-")) {
+      finishCurrent();
+      inIgnore = false;
+      continue;
+    }
+
+    const itemWithValue = trimmed.match(/^-\s+(\w+):\s*(.+)$/);
+    if (itemWithValue) {
+      finishCurrent();
+      current = { [itemWithValue[1]]: unquoteYamlScalar(itemWithValue[2]) };
+      continue;
+    }
+
+    if (/^-\s*$/.test(trimmed)) {
+      finishCurrent();
+      current = {};
+      continue;
+    }
+
+    const property = trimmed.match(/^(\w+):\s*(.+)$/);
+    if (property && current) {
+      current[property[1]] = unquoteYamlScalar(property[2]);
+    }
+  }
+
+  finishCurrent();
+  return suppressions.filter((item) => item.path);
+}
+
+function findAgentdiffConfigPath(rootDir) {
+  return ["agentdiff.yml", "agentdiff.yaml"]
+    .map((name) => path.join(rootDir, name))
+    .find((candidate) => fs.existsSync(candidate));
+}
+
+function unquoteYamlScalar(value) {
+  return value.trim().replace(/^["']|["']$/g, "");
 }
 
 function resolveGlobRelativeToCwd(rootDir, glob) {
@@ -897,6 +966,12 @@ function starterConfig() {
 detection:
   auto_update_map: true
   block_unmapped_agent_surfaces: false
+
+# Suppress intentional or noisy findings with a reason and expiration.
+# ignore:
+#   - path: "docs/**"
+#     reason: "documentation examples"
+#     expires: "2026-07-31"
 
 report:
   comment_on_pr: true

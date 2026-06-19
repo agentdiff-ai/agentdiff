@@ -178,6 +178,8 @@ The action writes:
 - GitHub job summary
 - one sticky PR comment marked with `<!-- agentdiff-report -->`
 
+Findings include explanation fields for why agentdiff flagged the surface, reachability/import evidence, risk evidence, and confidence reasoning. Intentional findings can be suppressed with `agentdiff.yml` while staying visible in the report. See [docs/suppressions.md](docs/suppressions.md).
+
 ## Local Commands
 
 Run the behavior-regression demo:
@@ -260,6 +262,7 @@ Read the public repo bakeoff summary: [docs/bakeoff.md](docs/bakeoff.md).
 - Tool files under `/tools/`.
 - JS/TS import graph reachability from agent entrypoints, including relative imports, `tsconfig`/`jsconfig` path aliases, and workspace package imports.
 - State-mutating and external-side-effect risk using path, function name, argument, and diff heuristics.
+- Suppressed intentional findings with reason/expiration audit visibility.
 
 ## What It Does Not Do Yet
 
@@ -272,6 +275,7 @@ Read the public repo bakeoff summary: [docs/bakeoff.md](docs/bakeoff.md).
 - No full TypeScript compiler resolution; `tsconfig` aliases and workspace imports are best-effort.
 - No live behavior harness execution in PRs yet.
 - No LLM judge or generic eval generation.
+- No complex suppression expression language; suppressions are path globs only.
 
 ## Real Harness Demo
 
