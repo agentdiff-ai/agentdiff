@@ -82,13 +82,29 @@ async function main(argv) {
 }
 
 async function init({ force }) {
-  writeFileSafe("agentdiff.yml", starterConfig(), { force });
+  const signals = detectOnboardingSignals(process.cwd());
+  writeFileSafe("agentdiff.yml", starterConfig(signals), { force });
   writeFileSafe(path.join(".agentdiff", "map.json"), `${JSON.stringify(starterMap(), null, 2)}\n`, { force });
   writeFileSafe(path.join(".agentdiff", "scenarios", "starter.json"), `${JSON.stringify(starterScenario(), null, 2)}\n`, { force });
 
   console.log("created agentdiff.yml");
   console.log("created .agentdiff/map.json");
   console.log("created .agentdiff/scenarios/starter.json");
+  console.log("");
+  console.log("detected:");
+  for (const line of summarizeOnboardingSignals(signals)) {
+    console.log(`- ${line}`);
+  }
+  console.log("");
+  console.log("next:");
+  console.log("1. scan this repo:");
+  console.log("   node packages/cli/bin/agentdiff.js scan");
+  console.log("2. review the generated map:");
+  console.log("   .agentdiff/runs/latest/map.json");
+  console.log("3. install the GitHub Action:");
+  console.log("   copy the workflow from README.md -> Install into .github/workflows/agentdiff.yml");
+  console.log("");
+  console.log("tip: suppressions require reason and expires; suppressed findings stay visible in reports.");
 }
 
 async function run({ base, head, out }) {
@@ -1017,28 +1033,95 @@ function writeFileSafe(filePath, content, { force }) {
   fs.writeFileSync(absolutePath, content);
 }
 
-function starterConfig() {
+function detectOnboardingSignals(rootDir) {
+  const packageJson = readJsonFileSafe(path.join(rootDir, "package.json"));
+  const tsconfigPath = ["tsconfig.json", "jsconfig.json"].map((name) => path.join(rootDir, name)).find((candidate) => fs.existsSync(candidate));
+  const tsconfig = tsconfigPath ? readJsonFileSafe(tsconfigPath) : null;
+  const candidateDirs = ["src/agents", "src/tools", "app/api", "pages/api"];
+  const langGraph = readLangGraphEntrypoints(rootDir);
+
+  return {
+    langgraphEntryPoints: langGraph.entrypoints,
+    workspaces: workspacePatternsFromPackage(packageJson),
+    pathAliases: Object.keys(tsconfig?.compilerOptions?.paths ?? {}),
+    candidateDirs: candidateDirs.filter((dir) => fs.existsSync(path.join(rootDir, dir))),
+    configFile: tsconfigPath ? path.basename(tsconfigPath) : null
+  };
+}
+
+function summarizeOnboardingSignals(signals) {
+  const lines = [];
+  if (signals.langgraphEntryPoints.length > 0) {
+    lines.push(`LangGraph graph entrypoints: ${signals.langgraphEntryPoints.join(", ")}`);
+  } else {
+    lines.push("LangGraph graph entrypoints: none detected");
+  }
+  if (signals.workspaces.length > 0) {
+    lines.push(`package.json workspaces: ${signals.workspaces.join(", ")}`);
+  } else {
+    lines.push("package.json workspaces: none detected");
+  }
+  if (signals.pathAliases.length > 0) {
+    lines.push(`${signals.configFile} path aliases: ${signals.pathAliases.join(", ")}`);
+  } else {
+    lines.push("tsconfig/jsconfig path aliases: none detected");
+  }
+  if (signals.candidateDirs.length > 0) {
+    lines.push(`common agent/API dirs: ${signals.candidateDirs.join(", ")}`);
+  } else {
+    lines.push("common agent/API dirs: none detected");
+  }
+  return lines;
+}
+
+function starterConfig(signals = { candidateDirs: [], langgraphEntryPoints: [] }) {
+  const entrypoints = dedupe([...signals.langgraphEntryPoints, ...signals.candidateDirs.map((dir) => `${dir}/**`), "src/agents/**", "app/api/**"]);
   return `agentdiff:
   entrypoints:
-    - src/agents/**
+${entrypoints.map((entrypoint) => `    - ${entrypoint}`).join("\n")}
   max_cost_usd: 3.00
   mode: byok
   language: typescript
+
+# Scan limits keep first runs fast and make large repos degrade into partial maps.
+# Environment overrides:
+#   AGENTDIFF_SCAN_MAX_FILE_BYTES=524288
+#   AGENTDIFF_SCAN_MAX_FILES=5000
+#   AGENTDIFF_SCAN_MAX_TOTAL_BYTES=26214400
+#   AGENTDIFF_SCAN_MAX_MAP_BYTES=10485760
 
 detection:
   auto_update_map: true
   block_unmapped_agent_surfaces: false
 
 # Suppress intentional or noisy findings with a reason and expiration.
+# Suppressed findings stay visible in report.md.
 # ignore:
 #   - path: "docs/**"
 #     reason: "documentation examples"
 #     expires: "2026-07-31"
+#   - path: "tests/**"
+#     reason: "test fixtures"
+#     expires: "2026-07-31"
+
+harnesses:
+  recorded:
+    command: node packages/cli/bin/agentdiff.js run --example coding-agent-harness --recorded
+  live_openrouter:
+    env:
+      AGENTDIFF_HARNESS: openrouter-openai
+      OPENROUTER_MODEL: xiaomi/mimo-v2.5-pro
+      AGENTDIFF_MAX_LIVE_COST_USD: "0.25"
+    command: node packages/cli/bin/agentdiff.js run --example coding-agent-harness --live
 
 report:
   comment_on_pr: true
   upload_artifacts: true
 `;
+}
+
+function dedupe(values) {
+  return [...new Set(values)];
 }
 
 function starterMap() {

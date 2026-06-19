@@ -99,7 +99,27 @@ cd agentdiff
 npm install
 ```
 
-Run the local behavior demo:
+Create starter config:
+
+```bash
+node packages/cli/bin/agentdiff.js init
+```
+
+Scan the repo and review the starter map:
+
+```bash
+node packages/cli/bin/agentdiff.js scan
+```
+
+Review:
+
+```txt
+.agentdiff/runs/latest/map.json
+```
+
+Then install the GitHub Action from the section below so agentdiff can comment on PRs.
+
+Run the local behavior demo when you want a known failing example:
 
 ```bash
 node packages/cli/bin/agentdiff.js demo
