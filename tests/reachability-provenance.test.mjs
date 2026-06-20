@@ -127,4 +127,104 @@ export async function sendEmail({ recipientEmail }) {
   assert.notEqual(report.status, "action_required");
 }
 
+{
+  const surface = classifyChangedFile({
+    filePath: "frontend/src/components/MessageBubble.tsx",
+    content: `
+import { useState } from "react";
+export function MessageBubble() {
+  const [closed, setClosed] = useState(false);
+  return <button onClick={() => setClosed(true)}>close</button>;
+}
+`
+  });
+  assert.equal(surface.actionability, "context_only");
+  assert.match(surface.actionability_reason, /frontend_ui_context/);
+}
+
+{
+  const surface = classifyChangedFile({
+    filePath: "web/src/data/search-index.json",
+    content: JSON.stringify({ documents: [{ title: "sendEmail", body: "send email and close tickets" }] })
+  });
+  assert.equal(surface.actionability, "likely_noise");
+  assert.match(surface.actionability_reason, /generated_docs_context/);
+}
+
+{
+  const surface = classifyChangedFile({
+    filePath: ".agents/skills/runtime-behavior-probe/agents/openai.yaml",
+    content: "name: sendEmail\ninstructions: close the issue after sending email\n"
+  });
+  assert.equal(surface.actionability, "likely_noise");
+  assert.match(surface.actionability_reason, /generated_docs_context/);
+}
+
+{
+  const map = buildAgentMap({
+    repo: "mastra-ai/template-coding-agent",
+    files: [
+      {
+        filePath: "src/mastra/tools/daytona/tools.ts",
+        content: `
+export const sendPatchTool = createTool({
+  id: "sendPatch",
+  inputSchema: z.object({ recipientEmail: z.string() }),
+  execute: async ({ recipientEmail }) => ({ recipientEmail })
+});
+`
+      }
+    ]
+  });
+  const surface = surfaceFor(map, "src/mastra/tools/daytona/tools.ts");
+  assert.equal(surface.actionability, "review_recommended");
+  assert.match(surface.actionability_reason, /example_template_context/);
+}
+
+{
+  const surface = classifyChangedFile({
+    filePath: "app/api/projects/route.ts",
+    content: `
+export async function DELETE(request) {
+  const id = new URL(request.url).searchParams.get("id");
+  await db.project.delete({ where: { id } });
+  return Response.json({ ok: true });
+}
+`
+  });
+  assert.notEqual(surface.actionability, "action_required");
+  assert.equal(surface.actionability, "context_only");
+  assert.match(surface.actionability_reason, /generic_server_crud_context|weak_runtime_evidence_context/);
+}
+
+{
+  const surface = classifyChangedFile({
+    filePath: "app/api/mcp-servers/route.ts",
+    content: `
+export async function POST() {
+  return createTool({
+    name: "sendEmail",
+    parameters: z.object({ recipientEmail: z.string() }),
+    execute: async ({ recipientEmail }) => fetch("https://mail.example/send", { method: "POST", body: recipientEmail })
+  });
+}
+`
+  });
+  assert.equal(surface.actionability, "action_required");
+  assert.match(surface.actionability_reason, /runtime_tool_execution_context/);
+}
+
+{
+  const surface = classifyChangedFile({
+    filePath: "src/tools/sendInvoice.ts",
+    content: `
+export async function sendInvoice({ recipientEmail, amountUsd, customerId }) {
+  return fetch("https://billing.example/invoices", { method: "POST", body: JSON.stringify({ recipientEmail, amountUsd, customerId }) });
+}
+`
+  });
+  assert.equal(surface.actionability, "action_required");
+  assert.match(surface.actionability_reason, /runtime_tool_execution_context/);
+}
+
 console.log("reachability provenance tests passed");

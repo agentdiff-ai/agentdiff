@@ -190,9 +190,11 @@ export function classifyChangedFile({ filePath, content = "" }) {
     evidence: [...new Set(evidence)],
     recommended_check_depth: recommendedCheckDepth
   };
+  const actionability = actionabilityDecisionForSurface(baseSurface);
   return {
     ...baseSurface,
-    actionability: actionabilityForSurface(baseSurface)
+    actionability: actionability.actionability,
+    actionability_reason: actionability.reason
   };
 }
 
@@ -261,6 +263,7 @@ export function buildAgentMap({ files, repo = process.cwd(), entrypointGlobs = [
   const importGraph = buildImportGraph(fileRecords, importResolver);
   const initialSurfaces = fileRecords
     .map((file) => classifyChangedFile(file))
+    .map((surface) => applyRepoContext(surface, repo))
     .map((surface) => applyConfiguredEntrypoint(surface, entrypointGlobs, normalizedEntrypointSources));
   const entrypoints = resolveGraphEntrypoints({ surfaces: initialSurfaces, files: fileRecords, entrypointGlobs });
   const reachability = computeReachability(importGraph.edges, entrypoints);
@@ -500,17 +503,226 @@ export function classifyReachabilityProvenance({ path: filePath = "", chain = []
   return { provenance: "unknown", reason: "no reachability path available" };
 }
 
-function actionabilityForSurface(surface) {
+function actionabilityDecisionForSurface(surface) {
   const hasHighRisk = (surface.risk ?? []).some((risk) => HIGH_RISK_TAGS.has(risk));
   const provenance = surface.reachability_provenance ?? "unknown";
 
-  if (provenance === "runtime" && hasHighRisk) return "action_required";
-  if (provenance === "example" && hasHighRisk) return "review_recommended";
-  if (provenance === "test") return "context_only";
-  if (["docs", "config", "generated", "archive"].includes(provenance)) return "likely_noise";
-  if (hasHighRisk) return surface.reachable_from_entrypoint ? "review_recommended" : "context_only";
-  if (surface.label !== "not_agent_related") return "context_only";
-  return "likely_noise";
+  if (isGeneratedDocsContext(surface)) {
+    return {
+      actionability: "likely_noise",
+      reason: "generated_docs_context: generated docs/search/config data is not urgent runtime behavior unless explicitly configured as an entrypoint"
+    };
+  }
+
+  if (isFrontendUiContext(surface)) {
+    return {
+      actionability: "context_only",
+      reason: "frontend_ui_context: frontend/UI state surfaces are context unless they are API or tool execution boundaries"
+    };
+  }
+
+  if (isExampleTemplateContext(surface) && !isExplicitProductionEntrypoint(surface)) {
+    return {
+      actionability: hasHighRisk ? "review_recommended" : "context_only",
+      reason: "example_template_context: examples, templates, starters, courses, workshops, and demos are visible but not production-urgent by default"
+    };
+  }
+
+  if (isGenericServerCrudContext(surface)) {
+    return {
+      actionability: hasHighRisk ? "context_only" : "likely_noise",
+      reason: "generic_server_crud_context: generic API/server CRUD routes need agent/tool/framework evidence before becoming action_required"
+    };
+  }
+
+  if (isConfigHelperContext(surface) && !hasExecutableToolBoundary(surface)) {
+    return {
+      actionability: hasHighRisk ? "review_recommended" : "context_only",
+      reason: "config_helper_context: config/helper/SDK internals are not urgent unless they define or execute a tool, agent, or workflow boundary"
+    };
+  }
+
+  if (provenance === "test") {
+    return { actionability: "context_only", reason: "test_context: test and fixture surfaces are context-only by default" };
+  }
+
+  if (["docs", "config", "generated", "archive"].includes(provenance)) {
+    return {
+      actionability: "likely_noise",
+      reason: `${provenance}_context: ${provenance} surfaces are not urgent runtime behavior by default`
+    };
+  }
+
+  if (provenance === "example" && hasHighRisk) {
+    return {
+      actionability: "review_recommended",
+      reason: "example_template_context: high-risk example surfaces are reviewable but not production-urgent by default"
+    };
+  }
+
+  if (provenance === "runtime" && hasHighRisk && hasActionRequiredEvidence(surface)) {
+    return {
+      actionability: "action_required",
+      reason: "runtime_tool_execution_context: runtime surface has agent/tool execution evidence and strong side-effect evidence"
+    };
+  }
+
+  if (provenance === "runtime" && hasHighRisk) {
+    return {
+      actionability: "review_recommended",
+      reason: "weak_runtime_evidence_context: runtime path has risk words but lacks enough executable agent/tool side-effect evidence for action_required"
+    };
+  }
+
+  if (hasHighRisk) {
+    return {
+      actionability: surface.reachable_from_entrypoint ? "review_recommended" : "context_only",
+      reason: "weak_runtime_evidence_context: high-risk wording is visible but not proven urgent runtime agent behavior"
+    };
+  }
+
+  if (surface.label !== "not_agent_related") {
+    return { actionability: "context_only", reason: "agent_context_without_high_risk: agent-related surface has no high-risk behavior evidence" };
+  }
+
+  return { actionability: "likely_noise", reason: "no_agent_context: no agent-related surface evidence" };
+}
+
+function hasActionRequiredEvidence(surface) {
+  return hasExecutableToolBoundary(surface) && hasStrongSideEffectEvidence(surface);
+}
+
+function hasExecutableToolBoundary(surface) {
+  const normalized = normalizePath(surface.path ?? "").toLowerCase();
+  const label = surface.label ?? "";
+  const category = surface.surface_category ?? "";
+  const evidence = (surface.evidence ?? []).join("\n").toLowerCase();
+
+  return (
+    surface.configured_entrypoint === true ||
+    surface.reachable_from_entrypoint === true ||
+    ["agent_entrypoint", "tool_implementation"].includes(label) ||
+    ["runtime_agent", "tool_implementation", "ai_sdk_tool", "tool_schema", "browser_tool", "framework_config"].includes(category) ||
+    matchesAny(normalized, ["/agents/", "/agent/", "/tools/", "/tool/", "/workflows/", "/workflow/", "/mastra/", "/langgraph", "/mcp", "/github-tools", "/gitlab"]) ||
+    /\b(model-call pattern|tool\/schema pattern|tool syntax|tool schema|agent factory|stategraph|mastra runtime|langgraph graph)\b/.test(evidence)
+  );
+}
+
+function hasStrongSideEffectEvidence(surface) {
+  const risk = surface.risk ?? [];
+  const evidence = (surface.evidence ?? []).join("\n").toLowerCase();
+  const normalized = normalizePath(surface.path ?? "").toLowerCase();
+  return (
+    risk.some((item) => ["external_side_effect", "money_movement", "destructive", "customer_visible"].includes(item)) ||
+    /\b(exported function .*suggests state mutation|function args include|ai sdk tool syntax: execute|openai tool schema|anthropic tool schema|external side effect|refund|charge|invoice|email|recipient|customer|payment|account|send|delete|close|publish|approve|revoke|grant)\b/.test(evidence) ||
+    /\b(refund|charge|invoice|email|payment|github|gitlab|slack|browser|mcp)\b/.test(normalized)
+  );
+}
+
+function isGeneratedDocsContext(surface) {
+  const normalized = normalizePath(surface.path ?? "").toLowerCase();
+  const basename = normalized.split("/").pop() ?? normalized;
+  return (
+    normalized.includes("/.agentdiff/") ||
+    normalized.startsWith(".agentdiff/") ||
+    normalized.includes("/.agents/") ||
+    normalized.startsWith(".agents/") ||
+    basename === "search-index.json" ||
+    normalized.includes("/search-index.") ||
+    normalized.includes("/docs-data/") ||
+    normalized.includes("/docs/data/") ||
+    normalized.includes("/web/src/data/") ||
+    ([".json", ".yaml", ".yml"].some((extension) => basename.endsWith(extension)) && !isExplicitRuntimeConfig(surface))
+  );
+}
+
+function isFrontendUiContext(surface) {
+  const normalized = normalizePath(surface.path ?? "").toLowerCase();
+  if (isApiOrToolExecutionPath(normalized)) return false;
+  return (
+    normalized.includes("/frontend/") ||
+    normalized.startsWith("frontend/") ||
+    normalized.includes("/renderer/") ||
+    normalized.startsWith("renderer/") ||
+    normalized.includes("/components/") ||
+    normalized.startsWith("components/") ||
+    normalized.includes("/ui/") ||
+    normalized.startsWith("ui/") ||
+    normalized.includes("/web/src/")
+  );
+}
+
+function isExampleTemplateContext(surface) {
+  const normalized = normalizePath(surface.path ?? "").toLowerCase();
+  const repoContext = normalizePath(surface.repo_context ?? "").toLowerCase();
+  return isExamplePath(normalized) || isExamplePath(repoContext);
+}
+
+function isExplicitProductionEntrypoint(surface) {
+  return surface.configured_entrypoint === true && surface.entrypoint_source === "agentdiff.yml";
+}
+
+function isConfigHelperContext(surface) {
+  const normalized = normalizePath(surface.path ?? "").toLowerCase();
+  const basename = normalized.split("/").pop() ?? normalized;
+  return (
+    matchesAny(basename, ["config", "schema", "types", "session", "constants", "provider", "adapter", "selector", "matcher"]) ||
+    matchesAny(normalized, ["/config/", "/schemas/", "/types/", "/providers/", "/adapters/", "/selectors/", "/sessions/"])
+  );
+}
+
+function isGenericServerCrudContext(surface) {
+  const normalized = normalizePath(surface.path ?? "").toLowerCase();
+  if (!isServerApiRoutePath(normalized)) return false;
+  if (matchesAny(normalized, ["agent", "tool", "workflow", "mastra", "langgraph", "mcp", "github", "gitlab"])) return false;
+  const evidence = (surface.evidence ?? []).join("\n").toLowerCase();
+  if (/\b(model-call pattern|tool\/schema pattern|tool syntax|tool schema|agent factory|stategraph|mastra runtime|langgraph graph)\b/.test(evidence)) return false;
+  return true;
+}
+
+function isServerApiRoutePath(normalized) {
+  return (
+    normalized.includes("/app/api/") ||
+    normalized.startsWith("app/api/") ||
+    normalized.includes("/server/") ||
+    normalized.startsWith("server/") ||
+    normalized.includes("/routes/") ||
+    normalized.startsWith("routes/")
+  );
+}
+
+function isApiOrToolExecutionPath(normalized) {
+  return (
+    normalized.includes("/app/api/") ||
+    normalized.startsWith("app/api/") ||
+    normalized.includes("/server/") ||
+    normalized.startsWith("server/") ||
+    normalized.includes("/tools/") ||
+    normalized.includes("/tool/") ||
+    normalized.includes("/mcp")
+  );
+}
+
+function isExplicitRuntimeConfig(surface) {
+  const basename = normalizePath(surface.path ?? "").toLowerCase().split("/").pop() ?? "";
+  return surface.configured_entrypoint === true || basename === "langgraph.json";
+}
+
+function applyRepoContext(surface, repo = "") {
+  const normalizedRepo = normalizePath(repo).toLowerCase();
+  if (!normalizedRepo || !isExamplePath(normalizedRepo)) return surface;
+  const evidence = [...surface.evidence, `repo context suggests example/template/demo: ${repo}`];
+  const withContext = {
+    ...surface,
+    repo_context: normalizedRepo,
+    evidence: unique(evidence)
+  };
+  const actionability = actionabilityDecisionForSurface(withContext);
+  return {
+    ...withContext,
+    actionability: actionability.actionability,
+    actionability_reason: actionability.reason
+  };
 }
 
 function isTestOrFixturePath(pathName) {
@@ -561,7 +773,15 @@ function isArchivePath(pathName) {
 }
 
 function isGeneratedPath(pathName) {
-  return pathName.includes("/generated/") || pathName.startsWith("generated/") || pathName.includes(".gen.") || /routetree\.gen\./.test(pathName);
+  const basename = pathName.split("/").pop() ?? pathName;
+  return (
+    pathName.includes("/generated/") ||
+    pathName.startsWith("generated/") ||
+    pathName.includes(".gen.") ||
+    /routetree\.gen\./.test(pathName) ||
+    basename === "search-index.json" ||
+    pathName.includes("/web/src/data/")
+  );
 }
 
 function isExamplePath(pathName) {
@@ -577,7 +797,12 @@ function isExamplePath(pathName) {
     pathName.includes("/starter/") ||
     pathName.startsWith("starter/") ||
     pathName.includes("/template/") ||
-    pathName.startsWith("template/")
+    pathName.startsWith("template/") ||
+    pathName.includes("/workshop/") ||
+    pathName.startsWith("workshop/") ||
+    pathName.includes("/course/") ||
+    pathName.startsWith("course/") ||
+    /(^|[/_-])(example|template|starter|workshop|course|demo)([/_-]|$)/.test(pathName)
   );
 }
 
@@ -586,11 +811,14 @@ function isConfigProvenancePath(pathName) {
   return (
     pathName.includes("/.github/") ||
     pathName.startsWith(".github/") ||
+    pathName.includes("/.agents/") ||
+    pathName.startsWith(".agents/") ||
     basename === "package.json" ||
     basename === "tsconfig.json" ||
     basename === "jsconfig.json" ||
     basename.startsWith("typedoc.") ||
     basename.includes(".config.") ||
+    ((basename.endsWith(".json") || basename.endsWith(".yaml") || basename.endsWith(".yml")) && basename !== "langgraph.json") ||
     basename === "package-lock.json" ||
     basename === "pnpm-lock.yaml" ||
     basename === "yarn.lock" ||
@@ -601,6 +829,7 @@ function isConfigProvenancePath(pathName) {
 function isRuntimePath(pathName) {
   return (
     pathName.includes("/app/api/") ||
+    pathName.startsWith("app/api/") ||
     pathName.includes("/server/") ||
     pathName.startsWith("server/") ||
     pathName.includes("/src/") ||
@@ -734,6 +963,9 @@ function buildSurfaceExplanation(surface) {
   if (surface.reachability_provenance) {
     whyFlagged.push(`reachability provenance: ${surface.reachability_provenance}`);
   }
+  if (surface.actionability_reason) {
+    whyFlagged.push(surface.actionability_reason);
+  }
 
   const riskEvidence = riskEvidenceForSurface(surface);
   const reachabilityChain = surface.reachability_chain?.length
@@ -762,6 +994,9 @@ function riskEvidenceForSurface(surface) {
 }
 
 function confidenceReasonForSurface(surface) {
+  if (surface.actionability_reason) {
+    return surface.actionability_reason;
+  }
   if (surface.actionability === "likely_noise") {
     return `low because this surface is ${surface.reachability_provenance ?? "non-runtime"}-reachable and should not be treated as urgent runtime risk`;
   }
@@ -903,7 +1138,9 @@ function applyMappedSurfaceMetadata(surface, agentMap) {
     imported_by: mapped.imported_by ?? surface.imported_by ?? [],
     reachability_provenance: mapped.reachability_provenance ?? surface.reachability_provenance,
     reachability_provenance_reason: mapped.reachability_provenance_reason ?? surface.reachability_provenance_reason,
-    actionability: mapped.actionability ?? surface.actionability
+    actionability: mapped.actionability ?? surface.actionability,
+    actionability_reason: mapped.actionability_reason ?? surface.actionability_reason,
+    repo_context: mapped.repo_context ?? surface.repo_context
   };
 }
 
@@ -1203,7 +1440,7 @@ function applyConfiguredEntrypoint(surface, entrypointGlobs, entrypointSources =
   } else {
     evidence.push("configured agentdiff.yml entrypoint");
   }
-  return {
+  const configuredSurface = {
     ...surface,
     label: surface.label === "not_agent_related" ? "agent_entrypoint" : surface.label,
     confidence: Math.max(surface.confidence, 0.84),
@@ -1211,6 +1448,12 @@ function applyConfiguredEntrypoint(surface, entrypointGlobs, entrypointSources =
     configured_entrypoint: true,
     entrypoint_source: source?.entrypoint_source ?? "agentdiff.yml",
     graph_name: source?.graph_name
+  };
+  const actionability = actionabilityDecisionForSurface(configuredSurface);
+  return {
+    ...configuredSurface,
+    actionability: actionability.actionability,
+    actionability_reason: actionability.reason
   };
 }
 
@@ -1343,14 +1586,15 @@ function applyReachability(surface, { reachability, importedBy, entrypoints, edg
     reachability_provenance: provenance.provenance,
     reachability_provenance_reason: provenance.reason
   };
-  const actionability = actionabilityForSurface(enrichedSurface);
+  const actionabilityDecision = actionabilityDecisionForSurface(enrichedSurface);
 
   return {
     ...enrichedSurface,
     confidence: Number(confidence.toFixed(2)),
     evidence: unique(evidence),
     recommended_check_depth: recommendedCheckDepth,
-    actionability
+    actionability: actionabilityDecision.actionability,
+    actionability_reason: actionabilityDecision.reason
   };
 }
 
