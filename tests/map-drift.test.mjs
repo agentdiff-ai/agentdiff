@@ -31,9 +31,12 @@ export function sendInvoice({ recipientEmail, amountUsd, customerId }) {
   ]
 });
 
-assert.equal(report.status, "action_required");
+assert.equal(report.status, "warn");
 assert.equal(report.map_drift.length, 1);
 assert.equal(report.map_drift[0].finding_type, "new_unmapped_agent_surface");
+assert.equal(report.map_drift[0].severity, "medium");
+assert.equal(report.map_drift[0].reachability_provenance, "example");
+assert.equal(report.map_drift[0].actionability, "review_recommended");
 assert.equal(report.map_drift[0].label, "tool_implementation");
 assert.deepEqual(report.map_drift[0].risk, ["state_mutation", "external_side_effect"]);
 assert.match(report.map_drift[0].title, /New unmapped high-risk tool/);

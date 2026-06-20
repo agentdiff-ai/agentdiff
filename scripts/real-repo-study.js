@@ -207,7 +207,11 @@ function classifyFindings(map, cloneDir) {
 
 function rankSurface(surface) {
   let score = Number(surface.confidence ?? 0);
-  if (surface.reachable_from_entrypoint) score += 5;
+  if (surface.actionability === "action_required") score += 8;
+  if (surface.actionability === "review_recommended") score += 4;
+  if (surface.actionability === "context_only") score += 1;
+  if (surface.actionability === "likely_noise") score -= 4;
+  if (surface.reachable_from_entrypoint) score += 2;
   if (surface.risk?.length) score += 3;
   if (surface.label === "tool_implementation") score += 2;
   if (isDocTestConfig(surface.path, surface)) score -= 3;
@@ -231,6 +235,9 @@ function classifySurface(surface, map, cloneDir) {
     risk: surface.risk ?? [],
     confidence: surface.confidence ?? 0,
     reachable,
+    reachabilityProvenance: surface.reachability_provenance ?? "unknown",
+    reachabilityProvenanceReason: surface.reachability_provenance_reason ?? "",
+    actionability: surface.actionability ?? "context_only",
     reachableFrom: reach,
     importedBy,
     why: whySurfaceMatters({ surface, reachable, docLike, hasRisk }),
@@ -243,6 +250,10 @@ function classifySurface(surface, map, cloneDir) {
 }
 
 function whySurfaceMatters({ surface, reachable, docLike, hasRisk }) {
+  if (surface.actionability === "action_required") return "runtime-reachable high-risk surface; should be treated as action-required";
+  if (surface.actionability === "review_recommended") return "example/demo-reachable high-risk surface; useful signal but not production runtime proof";
+  if (surface.actionability === "context_only") return "test or unknown reachability; useful as context but not urgent runtime risk";
+  if (surface.actionability === "likely_noise") return "docs/config/archive/generated reachability; likely noise unless directly changed";
   if (docLike) return "docs/tests/config-like surface; useful as context but likely noisy for action-required reporting";
   if (reachable && hasRisk) return "reachable runtime surface with state mutation or external side-effect evidence";
   if (hasRisk) return "risk evidence exists but reachability is not established";
@@ -328,9 +339,15 @@ function statsFromMapAndOutput(map, stdout) {
     workspaceImportsResolved: numberFromOutput(stdout, "workspace imports resolved"),
     unresolvedNonRelativeImports: numberFromOutput(stdout, "unresolved non-relative imports"),
     unresolvedBuckets: unresolvedBucketsFromMap(map, stdout),
+    reachabilityProvenanceCounts: map?.scan?.reachability_provenance_counts ?? countBy(map?.surfaces ?? [], "reachability_provenance"),
+    actionabilityCounts: map?.scan?.actionability_counts ?? countBy(map?.surfaces ?? [], "actionability"),
     surfaces: map?.surfaces?.length ?? 0,
     agents: map?.agents?.length ?? 0,
-    reachableHighRiskSurfaces: (map?.surfaces ?? []).filter((surface) => surface.reachable_from_entrypoint && surface.risk?.length).length
+    reachableHighRiskSurfaces: (map?.surfaces ?? []).filter((surface) => surface.reachable_from_entrypoint && surface.risk?.length).length,
+    actionRequiredSurfaces: (map?.surfaces ?? []).filter((surface) => surface.actionability === "action_required").length,
+    reviewRecommendedSurfaces: (map?.surfaces ?? []).filter((surface) => surface.actionability === "review_recommended").length,
+    contextOnlySurfaces: (map?.surfaces ?? []).filter((surface) => surface.actionability === "context_only").length,
+    likelyNoiseSurfaces: (map?.surfaces ?? []).filter((surface) => surface.actionability === "likely_noise").length
   };
   return stats;
 }
@@ -391,7 +408,15 @@ function summarize(repos) {
     missedSignals: sum(repos, (repo) => repo.missedSignals?.length ?? 0),
     unresolvedAliasLike: sum(repos, (repo) => repo.stats?.unresolvedBuckets?.alias_like ?? 0),
     unresolvedWorkspaceLike: sum(repos, (repo) => repo.stats?.unresolvedBuckets?.workspace_package_like ?? 0),
-    unresolvedExternalLike: sum(repos, (repo) => repo.stats?.unresolvedBuckets?.external_dependency_like ?? 0)
+    unresolvedExternalLike: sum(repos, (repo) => repo.stats?.unresolvedBuckets?.external_dependency_like ?? 0),
+    runtimeFindings: sum(repos, (repo) => repo.stats?.reachabilityProvenanceCounts?.runtime ?? 0),
+    exampleFindings: sum(repos, (repo) => repo.stats?.reachabilityProvenanceCounts?.example ?? 0),
+    testFindings: sum(repos, (repo) => repo.stats?.reachabilityProvenanceCounts?.test ?? 0),
+    docsConfigArchiveGeneratedFindings: sumCountsByKeys(repos, "reachabilityProvenanceCounts", ["docs", "config", "archive", "generated"]),
+    actionRequiredFindings: sum(repos, (repo) => repo.stats?.actionabilityCounts?.action_required ?? 0),
+    reviewRecommendedFindings: sum(repos, (repo) => repo.stats?.actionabilityCounts?.review_recommended ?? 0),
+    contextOnlyFindings: sum(repos, (repo) => repo.stats?.actionabilityCounts?.context_only ?? 0),
+    likelyNoiseFindings: sum(repos, (repo) => repo.stats?.actionabilityCounts?.likely_noise ?? 0)
   };
 }
 
@@ -427,15 +452,17 @@ function renderReport(report) {
   lines.push(`useful/noisy/unclear findings: ${report.summary.usefulFindings}/${report.summary.noisyFindings}/${report.summary.unclearFindings}`);
   lines.push(`missed signals: ${report.summary.missedSignals}`);
   lines.push(`unresolved imports alias/workspace/external: ${report.summary.unresolvedAliasLike}/${report.summary.unresolvedWorkspaceLike}/${report.summary.unresolvedExternalLike}`);
+  lines.push(`reachability provenance runtime/example/test/docs-config-archive-generated: ${report.summary.runtimeFindings}/${report.summary.exampleFindings}/${report.summary.testFindings}/${report.summary.docsConfigArchiveGeneratedFindings}`);
+  lines.push(`actionability action_required/review_recommended/context_only/likely_noise: ${report.summary.actionRequiredFindings}/${report.summary.reviewRecommendedFindings}/${report.summary.contextOnlyFindings}/${report.summary.likelyNoiseFindings}`);
   lines.push("");
   lines.push("## Repo Table");
   lines.push("");
-  lines.push("| repo | status | default branch | clone URL | size KB | surfaces | reachable high-risk | useful | noisy | missed | unresolved alias/workspace/external | note |");
-  lines.push("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
+  lines.push("| repo | status | default branch | clone URL | size KB | surfaces | action/review/context/noise | runtime/example/test | useful | noisy | missed | unresolved alias/workspace/external | note |");
+  lines.push("| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
   for (const repo of report.repos) {
     const note = repo.skipReason ?? (repo.metadataUnavailable ? "metadata unavailable" : repo.errors?.[0] ?? "");
     lines.push(
-      `| ${repo.repo} | ${repo.status} | ${repo.metadata?.defaultBranch ?? ""} | ${repo.metadata?.cloneUrl ?? repo.url} | ${repo.metadata?.sizeKb ?? ""} | ${repo.stats?.surfaces ?? ""} | ${repo.stats?.reachableHighRiskSurfaces ?? ""} | ${repo.usefulFindings?.length ?? 0} | ${repo.noisyFindings?.length ?? 0} | ${repo.missedSignals?.length ?? 0} | ${(repo.stats?.unresolvedBuckets?.alias_like ?? 0)}/${(repo.stats?.unresolvedBuckets?.workspace_package_like ?? 0)}/${(repo.stats?.unresolvedBuckets?.external_dependency_like ?? 0)} | ${note} |`
+      `| ${repo.repo} | ${repo.status} | ${repo.metadata?.defaultBranch ?? ""} | ${repo.metadata?.cloneUrl ?? repo.url} | ${repo.metadata?.sizeKb ?? ""} | ${repo.stats?.surfaces ?? ""} | ${repo.stats?.actionRequiredSurfaces ?? 0}/${repo.stats?.reviewRecommendedSurfaces ?? 0}/${repo.stats?.contextOnlySurfaces ?? 0}/${repo.stats?.likelyNoiseSurfaces ?? 0} | ${repo.stats?.reachabilityProvenanceCounts?.runtime ?? 0}/${repo.stats?.reachabilityProvenanceCounts?.example ?? 0}/${repo.stats?.reachabilityProvenanceCounts?.test ?? 0} | ${repo.usefulFindings?.length ?? 0} | ${repo.noisyFindings?.length ?? 0} | ${repo.missedSignals?.length ?? 0} | ${(repo.stats?.unresolvedBuckets?.alias_like ?? 0)}/${(repo.stats?.unresolvedBuckets?.workspace_package_like ?? 0)}/${(repo.stats?.unresolvedBuckets?.external_dependency_like ?? 0)} | ${note} |`
     );
   }
   lines.push("");
@@ -445,6 +472,7 @@ function renderReport(report) {
     lines.push(`### ${repo.repo}`);
     for (const finding of repo.usefulFindings.slice(0, 5)) {
       lines.push(`- ${finding.path}: ${finding.why}`);
+      lines.push(`  provenance/actionability: ${finding.reachabilityProvenance}/${finding.actionability}`);
       if (finding.risk?.length) lines.push(`  risk: ${finding.risk.join(", ")}`);
       if (finding.reachableFrom?.length) lines.push(`  reachable from: ${finding.reachableFrom.slice(0, 3).join(" -> ")}`);
     }
@@ -607,4 +635,16 @@ function tail(value) {
 
 function sum(items, fn) {
   return items.reduce((total, item) => total + fn(item), 0);
+}
+
+function countBy(items, key) {
+  return (items ?? []).reduce((counts, item) => {
+    const value = item?.[key] ?? "unknown";
+    counts[value] = (counts[value] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function sumCountsByKeys(repos, countKey, keys) {
+  return sum(repos, (repo) => keys.reduce((total, key) => total + Number(repo.stats?.[countKey]?.[key] ?? 0), 0));
 }

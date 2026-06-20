@@ -205,7 +205,9 @@ async function scan({ root, out }) {
     alias_imports_resolved: map.import_graph.alias_imports_resolved,
     workspace_imports_resolved: map.import_graph.workspace_imports_resolved,
     unresolved_non_relative_imports: map.import_graph.unresolved_non_relative_imports,
-    unresolved_import_buckets: map.import_graph.unresolved_import_buckets
+    unresolved_import_buckets: map.import_graph.unresolved_import_buckets,
+    reachability_provenance_counts: countBy(map.surfaces, "reachability_provenance"),
+    actionability_counts: countBy(map.surfaces, "actionability")
   };
 
   const outPath = path.resolve(process.cwd(), out);
@@ -232,6 +234,14 @@ async function scan({ root, out }) {
   for (const [bucket, value] of Object.entries(map.scan.unresolved_import_buckets ?? {})) {
     console.log(`unresolved ${bucket}: ${value.count}`);
   }
+  console.log(`runtime findings: ${map.scan.reachability_provenance_counts.runtime ?? 0}`);
+  console.log(`example findings: ${map.scan.reachability_provenance_counts.example ?? 0}`);
+  console.log(`test findings: ${map.scan.reachability_provenance_counts.test ?? 0}`);
+  console.log(`docs/config/archive/generated findings: ${sumCounts(map.scan.reachability_provenance_counts, ["docs", "config", "archive", "generated"])}`);
+  console.log(`action_required findings: ${map.scan.actionability_counts.action_required ?? 0}`);
+  console.log(`review_recommended findings: ${map.scan.actionability_counts.review_recommended ?? 0}`);
+  console.log(`context_only findings: ${map.scan.actionability_counts.context_only ?? 0}`);
+  console.log(`likely_noise findings: ${map.scan.actionability_counts.likely_noise ?? 0}`);
   console.log(`agent surfaces: ${map.surfaces.length}`);
   console.log(`agents: ${map.agents.length}`);
   console.log(`map: ${outPath}`);
@@ -1240,6 +1250,22 @@ jobs:
 
 function dedupe(values) {
   return [...new Set(values)];
+}
+
+function countBy(items, key) {
+  return Object.fromEntries(
+    Object.entries(
+      (items ?? []).reduce((counts, item) => {
+        const value = item?.[key] ?? "unknown";
+        counts[value] = (counts[value] ?? 0) + 1;
+        return counts;
+      }, {})
+    ).sort(([left], [right]) => left.localeCompare(right))
+  );
+}
+
+function sumCounts(counts, keys) {
+  return keys.reduce((total, key) => total + Number(counts?.[key] ?? 0), 0);
 }
 
 function starterMap() {

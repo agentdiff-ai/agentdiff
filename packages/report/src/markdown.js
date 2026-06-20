@@ -154,6 +154,12 @@ function renderClassificationReport(report) {
     lines.push(`type: ${finding.finding_type}`);
     lines.push(`label: ${finding.label}`);
     lines.push(`risk: ${finding.risk.length ? finding.risk.join(", ") : "none"}`);
+    if (finding.reachability_provenance) {
+      lines.push(`reachability provenance: ${finding.reachability_provenance}`);
+    }
+    if (finding.actionability) {
+      lines.push(`actionability: ${finding.actionability}`);
+    }
     if (typeof finding.reachable_from_entrypoint === "boolean") {
       lines.push(`reachable from entrypoint: ${finding.reachable_from_entrypoint ? "yes" : "no"}`);
     }
@@ -173,8 +179,10 @@ function renderClassificationReport(report) {
   lines.push("");
   for (const surface of report.changed_surfaces) {
     const reachable = typeof surface.reachable_from_entrypoint === "boolean" ? `, reachable=${surface.reachable_from_entrypoint ? "yes" : "no"}` : "";
+    const provenance = surface.reachability_provenance ? `, provenance=${surface.reachability_provenance}` : "";
+    const actionability = surface.actionability ? `, actionability=${surface.actionability}` : "";
     const suppressed = surface.suppressed ? ", suppressed=yes" : "";
-    lines.push(`- ${surface.path}: ${surface.label}/${surface.surface_category ?? "uncategorized"} (${surface.confidence}${reachable}${suppressed})`);
+    lines.push(`- ${surface.path}: ${surface.label}/${surface.surface_category ?? "uncategorized"} (${surface.confidence}${reachable}${provenance}${actionability}${suppressed})`);
   }
   lines.push("");
 
@@ -193,6 +201,9 @@ function renderExplanation(lines, finding) {
   if ((explanation.reachability_chain ?? []).length > 0) {
     lines.push("");
     lines.push(`reachable from: ${explanation.reachability_chain.join(" -> ")}`);
+  }
+  if (finding.reachability_provenance_reason) {
+    lines.push(`reachability provenance reason: ${finding.reachability_provenance_reason}`);
   }
   if ((finding.imported_by ?? []).length > 0) {
     lines.push("");

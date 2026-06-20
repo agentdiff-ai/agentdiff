@@ -46,6 +46,12 @@ const IGNORED_CALLS = new Set([
 ]);
 
 const JS_TS_EXTENSIONS = [".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
+const ACTIONABILITY_TO_SEVERITY = {
+  action_required: "high",
+  review_recommended: "medium",
+  context_only: "low",
+  likely_noise: "low"
+};
 
 export function readJson(path) {
   return JSON.parse(fs.readFileSync(path, "utf8"));
@@ -171,14 +177,22 @@ export function classifyChangedFile({ filePath, content = "" }) {
     evidence.push("no agent-related path or content signals detected");
   }
 
-  return {
+  const reachabilityProvenance = classifyReachabilityProvenance({ path: filePath });
+
+  const baseSurface = {
     path: filePath,
     label,
     surface_category: surfaceCategoryFor({ filePath, label, content, frameworkConfigSignal, aiSdkToolSignals, toolSchemaSignals }),
+    reachability_provenance: reachabilityProvenance.provenance,
+    reachability_provenance_reason: reachabilityProvenance.reason,
     confidence: Number(confidence.toFixed(2)),
     risk: [...new Set(risk)],
     evidence: [...new Set(evidence)],
     recommended_check_depth: recommendedCheckDepth
+  };
+  return {
+    ...baseSurface,
+    actionability: actionabilityForSurface(baseSurface)
   };
 }
 
@@ -441,6 +455,14 @@ function statusFromFindings(findings) {
 }
 
 function recommendationForSurface(surface) {
+  if (surface.actionability === "likely_noise") {
+    return "Keep as context unless this surface is directly changed or configured as runtime agent code.";
+  }
+
+  if (surface.actionability === "context_only") {
+    return "Treat as context. Review only if this PR intentionally changes test harness, examples, or evaluation behavior.";
+  }
+
   if (surface.risk.includes("external_side_effect")) {
     return "Add or update a scenario before merge. External side effects should not ship without a behavior check.";
   }
@@ -454,6 +476,143 @@ function recommendationForSurface(surface) {
   }
 
   return "Review whether this surface belongs in .agentdiff/map.json.";
+}
+
+export function classifyReachabilityProvenance({ path: filePath = "", chain = [], reachableEntryPoints = [] } = {}) {
+  const paths = unique([...chain, ...reachableEntryPoints, filePath].filter(Boolean)).map((item) => normalizePath(item).toLowerCase());
+  const checks = [
+    ["generated", isGeneratedPath],
+    ["archive", isArchivePath],
+    ["docs", isDocsPath],
+    ["config", isConfigProvenancePath],
+    ["test", isTestOrFixturePath],
+    ["example", isExamplePath]
+  ];
+
+  for (const [provenance, predicate] of checks) {
+    const matched = paths.find((item) => predicate(item));
+    if (matched) return { provenance, reason: `${provenance} path matched ${matched}` };
+  }
+
+  const runtimePath = paths.find((item) => isRuntimePath(item));
+  if (runtimePath) return { provenance: "runtime", reason: `runtime path matched ${runtimePath}` };
+  if (paths.length > 0) return { provenance: "unknown", reason: `no runtime/test/example/docs/archive/generated/config pattern matched ${paths[0]}` };
+  return { provenance: "unknown", reason: "no reachability path available" };
+}
+
+function actionabilityForSurface(surface) {
+  const hasHighRisk = (surface.risk ?? []).some((risk) => HIGH_RISK_TAGS.has(risk));
+  const provenance = surface.reachability_provenance ?? "unknown";
+
+  if (provenance === "runtime" && hasHighRisk) return "action_required";
+  if (provenance === "example" && hasHighRisk) return "review_recommended";
+  if (provenance === "test") return "context_only";
+  if (["docs", "config", "generated", "archive"].includes(provenance)) return "likely_noise";
+  if (hasHighRisk) return surface.reachable_from_entrypoint ? "review_recommended" : "context_only";
+  if (surface.label !== "not_agent_related") return "context_only";
+  return "likely_noise";
+}
+
+function isTestOrFixturePath(pathName) {
+  return (
+    pathName.includes("/__tests__/") ||
+    pathName.startsWith("__tests__/") ||
+    pathName.includes("/test/") ||
+    pathName.startsWith("test/") ||
+    pathName.includes("/tests/") ||
+    pathName.startsWith("tests/") ||
+    pathName.includes("/integration-tests/") ||
+    pathName.startsWith("integration-tests/") ||
+    pathName.includes("/e2e/") ||
+    pathName.startsWith("e2e/") ||
+    pathName.includes("/fixtures/") ||
+    pathName.startsWith("fixtures/") ||
+    /\.[a-z]*test\.[^.]+$/.test(pathName) ||
+    /\.[a-z]*spec\.[^.]+$/.test(pathName) ||
+    /\.test\./.test(pathName) ||
+    /\.spec\./.test(pathName) ||
+    /\.test-/.test(pathName) ||
+    /\.spec-/.test(pathName)
+  );
+}
+
+function isDocsPath(pathName) {
+  const basename = pathName.split("/").pop() ?? pathName;
+  if (pathName.includes("/docs/") || pathName.startsWith("docs/") || pathName.includes("/website/") || pathName.startsWith("website/")) return true;
+  if (["readme.md", "changelog.md"].includes(basename)) return true;
+  if ((pathName.endsWith(".md") || pathName.endsWith(".mdx")) && !isExplicitAgentInstructionPath(pathName)) return true;
+  return false;
+}
+
+function isExplicitAgentInstructionPath(pathName) {
+  const basename = pathName.split("/").pop() ?? pathName;
+  return basename === "agents.md" || basename === "agent.md" || basename.includes(".agent.");
+}
+
+function isArchivePath(pathName) {
+  return (
+    pathName.includes("/archive/") ||
+    pathName.startsWith("archive/") ||
+    pathName.includes("/deprecated/") ||
+    pathName.startsWith("deprecated/") ||
+    pathName.includes("/legacy/") ||
+    pathName.startsWith("legacy/")
+  );
+}
+
+function isGeneratedPath(pathName) {
+  return pathName.includes("/generated/") || pathName.startsWith("generated/") || pathName.includes(".gen.") || /routetree\.gen\./.test(pathName);
+}
+
+function isExamplePath(pathName) {
+  return (
+    pathName.includes("/examples/") ||
+    pathName.startsWith("examples/") ||
+    pathName.includes("/example/") ||
+    pathName.startsWith("example/") ||
+    pathName.includes("/demo/") ||
+    pathName.startsWith("demo/") ||
+    pathName.includes("/sample/") ||
+    pathName.startsWith("sample/") ||
+    pathName.includes("/starter/") ||
+    pathName.startsWith("starter/") ||
+    pathName.includes("/template/") ||
+    pathName.startsWith("template/")
+  );
+}
+
+function isConfigProvenancePath(pathName) {
+  const basename = pathName.split("/").pop() ?? pathName;
+  return (
+    pathName.includes("/.github/") ||
+    pathName.startsWith(".github/") ||
+    basename === "package.json" ||
+    basename === "tsconfig.json" ||
+    basename === "jsconfig.json" ||
+    basename.startsWith("typedoc.") ||
+    basename.includes(".config.") ||
+    basename === "package-lock.json" ||
+    basename === "pnpm-lock.yaml" ||
+    basename === "yarn.lock" ||
+    basename === "bun.lockb"
+  );
+}
+
+function isRuntimePath(pathName) {
+  return (
+    pathName.includes("/app/api/") ||
+    pathName.includes("/server/") ||
+    pathName.startsWith("server/") ||
+    pathName.includes("/src/") ||
+    pathName.startsWith("src/") ||
+    /(^|\/)packages\/[^/]+\/src\//.test(pathName) ||
+    pathName.includes("/lib/") ||
+    pathName.startsWith("lib/") ||
+    pathName.includes("/routes/") ||
+    pathName.includes("/workflows/") ||
+    pathName.includes("/agents/") ||
+    pathName.includes("/tools/")
+  );
 }
 
 function compareCodingAgentBehavior(baseTrace, headTrace) {
@@ -572,6 +731,9 @@ function buildSurfaceExplanation(surface) {
   }
   whyFlagged.push(`classified as ${surface.label}`);
   if (surface.surface_category) whyFlagged.push(`surface category: ${surface.surface_category}`);
+  if (surface.reachability_provenance) {
+    whyFlagged.push(`reachability provenance: ${surface.reachability_provenance}`);
+  }
 
   const riskEvidence = riskEvidenceForSurface(surface);
   const reachabilityChain = surface.reachability_chain?.length
@@ -600,6 +762,18 @@ function riskEvidenceForSurface(surface) {
 }
 
 function confidenceReasonForSurface(surface) {
+  if (surface.actionability === "likely_noise") {
+    return `low because this surface is ${surface.reachability_provenance ?? "non-runtime"}-reachable and should not be treated as urgent runtime risk`;
+  }
+  if (surface.actionability === "context_only") {
+    return `context-only because this surface is ${surface.reachability_provenance ?? "not clearly runtime"}-reachable`;
+  }
+  if (surface.actionability === "review_recommended") {
+    return `medium because this is ${surface.reachability_provenance ?? "non-production"}-reachable high-risk behavior`;
+  }
+  if (surface.actionability === "action_required") {
+    return "high because this is runtime-reachable high-risk behavior";
+  }
   if (surface.confidence >= 0.85 && surface.reachable_from_entrypoint) {
     return `high because this surface is reachable from an entrypoint and has ${surface.label} evidence`;
   }
@@ -676,6 +850,9 @@ function buildMapDriftFinding({ surface, mappedPaths }) {
         surface_category: surface.surface_category,
         risk: surface.risk,
         reachable_from_entrypoint: surface.reachable_from_entrypoint,
+        reachability_provenance: surface.reachability_provenance,
+        reachability_provenance_reason: surface.reachability_provenance_reason,
+        actionability: surface.actionability,
         reachable_entrypoints: surface.reachable_entrypoints,
         reachability_chain: surface.reachability_chain,
         imported_by: surface.imported_by,
@@ -696,6 +873,9 @@ function buildMapDriftFinding({ surface, mappedPaths }) {
       surface_category: surface.surface_category,
       risk: surface.risk,
       reachable_from_entrypoint: surface.reachable_from_entrypoint,
+      reachability_provenance: surface.reachability_provenance,
+      reachability_provenance_reason: surface.reachability_provenance_reason,
+      actionability: surface.actionability,
       reachable_entrypoints: surface.reachable_entrypoints,
       reachability_chain: surface.reachability_chain,
       imported_by: surface.imported_by,
@@ -720,11 +900,17 @@ function applyMappedSurfaceMetadata(surface, agentMap) {
     reachable_from_entrypoint: mapped.reachable_from_entrypoint ?? surface.reachable_from_entrypoint ?? false,
     reachable_entrypoints: mapped.reachable_entrypoints ?? surface.reachable_entrypoints ?? [],
     reachability_chain: mapped.reachability_chain ?? surface.reachability_chain ?? [],
-    imported_by: mapped.imported_by ?? surface.imported_by ?? []
+    imported_by: mapped.imported_by ?? surface.imported_by ?? [],
+    reachability_provenance: mapped.reachability_provenance ?? surface.reachability_provenance,
+    reachability_provenance_reason: mapped.reachability_provenance_reason ?? surface.reachability_provenance_reason,
+    actionability: mapped.actionability ?? surface.actionability
   };
 }
 
 function severityForSurface(surface) {
+  if (surface.actionability && ACTIONABILITY_TO_SEVERITY[surface.actionability]) {
+    return ACTIONABILITY_TO_SEVERITY[surface.actionability];
+  }
   if (!surface.reachable_from_entrypoint && isDocLikeSurface(surface)) return "low";
   if (surface.reachable_from_entrypoint && surface.label === "tool_implementation" && surface.risk.includes("external_side_effect")) return "high";
   if (surface.label === "tool_implementation" && surface.risk.includes("external_side_effect")) return "high";
@@ -1143,16 +1329,28 @@ function applyReachability(surface, { reachability, importedBy, entrypoints, edg
     confidence = Math.min(confidence, 0.45);
     recommendedCheckDepth = "classify";
   }
-
-  return {
+  const provenance = classifyReachabilityProvenance({
+    path: surface.path,
+    chain: reachabilityChain,
+    reachableEntryPoints
+  });
+  const enrichedSurface = {
     ...surface,
-    confidence: Number(confidence.toFixed(2)),
-    evidence: unique(evidence),
-    recommended_check_depth: recommendedCheckDepth,
     reachable_from_entrypoint: reachableFromEntrypoint,
     reachable_entrypoints: reachableEntryPoints,
     reachability_chain: reachabilityChain,
-    imported_by: directImporters
+    imported_by: directImporters,
+    reachability_provenance: provenance.provenance,
+    reachability_provenance_reason: provenance.reason
+  };
+  const actionability = actionabilityForSurface(enrichedSurface);
+
+  return {
+    ...enrichedSurface,
+    confidence: Number(confidence.toFixed(2)),
+    evidence: unique(evidence),
+    recommended_check_depth: recommendedCheckDepth,
+    actionability
   };
 }
 
