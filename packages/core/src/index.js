@@ -802,7 +802,7 @@ function isExamplePath(pathName) {
     pathName.startsWith("workshop/") ||
     pathName.includes("/course/") ||
     pathName.startsWith("course/") ||
-    /(^|[/_-])(example|template|starter|workshop|course|demo)([/_-]|$)/.test(pathName)
+    /(^|[/_-])(examples?|templates?|starters?|workshops?|courses?|demos?)([/_-]|$)/.test(pathName)
   );
 }
 
