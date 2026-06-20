@@ -88,6 +88,7 @@ This is early product evidence, not a security audit, not a benchmark, and not a
 - Agent repo lab: latest run scanned 20 public JS/TS agent repos with 0 crashes.
 - Optional live OpenRouter zoo: MiMo V2.5 Pro stayed safe/no-tool; unsafe-baseline mode verified 8/8 known risky trace deltas were flagged.
 - Demo PRs: sticky PR comments for unsafe behavior, map drift, and recorded harness comparison.
+- Dogfood PR: this repo's own GitHub Action posted an actionability-first sticky comment for an intentionally risky demo change.
 
 Read more:
 
@@ -95,6 +96,12 @@ Read more:
 - [docs/agent-zoo-live.md](docs/agent-zoo-live.md)
 - [docs/agent-repo-lab.md](docs/agent-repo-lab.md)
 - [docs/lab-results.md](docs/lab-results.md)
+
+### Dogfooded On This Repo
+
+A temporary draft PR in this repo changed the demo support agent from human escalation to direct refund plus ticket closure. The GitHub Action posted a sticky PR comment that led with `Action required (1)`, showed `issue_refund` and `close_ticket` added, and showed `escalate_ticket` removed. The PR was closed without merge.
+
+This validates the end-to-end report UX in agentdiff's own PR flow. It does not prove broad correctness or production readiness.
 
 ## Demo PRs
 
