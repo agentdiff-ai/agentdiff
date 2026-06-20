@@ -7,6 +7,7 @@ node_modules/
 .agentdiff/real-repo-study/
 .agentdiff/agent-zoo/
 .agentdiff/agent-zoo-live/
+.agentdiff/pr-mining/
 .DS_Store
 dist/
 examples/remotion-demo/dist/
