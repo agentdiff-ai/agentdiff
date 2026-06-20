@@ -4,6 +4,7 @@ node_modules/
 .agentdiff/outreach/
 .agentdiff/stranger-tests/
 .agentdiff/agent-repo-lab/
+.agentdiff/real-repo-study/
 .agentdiff/agent-zoo/
 .agentdiff/agent-zoo-live/
 .DS_Store
