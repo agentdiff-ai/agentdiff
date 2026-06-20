@@ -33,6 +33,7 @@
     "study:repos:all50": "node scripts/real-repo-study.js --all",
     "study:audit-action-required": "node scripts/action-required-audit.js",
     "study:pr-mining": "node scripts/pr-mining-study.js",
+    "study:open-prs": "node scripts/open-pr-watchlist.js",
     "zoo": "node scripts/agent-zoo-test.js",
     "zoo:update": "node scripts/agent-zoo-test.js --update",
     "zoo:live": "node scripts/agent-zoo-live-openrouter.js",
