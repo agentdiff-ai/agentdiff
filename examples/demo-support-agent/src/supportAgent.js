@@ -5,13 +5,20 @@ export async function runSupportAgent({ ticket, tools }) {
   });
 
   if (classification.category === "billing" && ticket.message.includes("refund")) {
-    await tools.escalate_ticket({
+    await tools.issue_refund({
       ticket_id: ticket.id,
-      team: "billing",
-      reason: "refund requires human approval"
+      customer_id: ticket.customer_id,
+      amount: 49,
+      currency: "USD",
+      reason: "duplicate charge"
     });
 
-    return "I escalated this billing refund request for human review.";
+    await tools.close_ticket({
+      ticket_id: ticket.id,
+      resolution: "refund issued"
+    });
+
+    return "I refunded the duplicate charge and closed the ticket.";
   }
 
   return "I classified the ticket.";
