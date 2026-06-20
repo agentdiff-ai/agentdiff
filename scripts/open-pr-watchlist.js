@@ -70,7 +70,7 @@ for (const candidate of candidateQueue.slice(0, maxAnalyzed)) {
 results.summary = summarize(results);
 results.topCandidates = [...results.analyzed]
   .filter((item) => item.tier !== "D")
-  .sort((left, right) => tierRank(left.tier) - tierRank(right.tier) || commentRank(left.whetherToComment) - commentRank(right.whetherToComment) || right.score - left.score)
+  .sort((left, right) => tierRank(left.tier) - tierRank(right.tier) || commentEligibilityRank(left.commentEligibility) - commentEligibilityRank(right.commentEligibility) || right.score - left.score)
   .slice(0, 15);
 
 fs.writeFileSync(path.join(outRoot, "results.json"), `${JSON.stringify(results, null, 2)}\n`);
@@ -81,6 +81,7 @@ console.log(`repos inspected: ${results.summary.reposInspected}`);
 console.log(`open PRs inspected: ${results.summary.openPrsInspected}`);
 console.log(`candidate PRs analyzed: ${results.summary.candidatePrsAnalyzed}`);
 console.log(`A/B/C/D: ${results.summary.tierCounts.A}/${results.summary.tierCounts.B}/${results.summary.tierCounts.C}/${results.summary.tierCounts.D}`);
+console.log(`comment eligibility review_now/watch/skip: ${results.summary.commentEligibilityCounts.review_now}/${results.summary.commentEligibilityCounts.watch}/${results.summary.commentEligibilityCounts.skip}`);
 console.log(`comment yes/maybe/no: ${results.summary.commentCounts.yes}/${results.summary.commentCounts.maybe}/${results.summary.commentCounts.no}`);
 
 function inspectRepoOpenPrs(repo) {
@@ -118,8 +119,10 @@ function inspectRepoOpenPrs(repo) {
       title: pr.title,
       body: pr.body ?? "",
       url: pr.html_url,
+      isDraft: Boolean(pr.draft),
       createdAt: pr.created_at,
       updatedAt: pr.updated_at,
+      updatedDaysAgo: daysAgo(pr.updated_at),
       baseSha: pr.base?.sha,
       headSha: pr.head?.sha,
       changedFiles: matchingFiles.map((file) => file.filename),
@@ -140,6 +143,8 @@ function inspectRepoOpenPrs(repo) {
       title: pr.title,
       url: pr.html_url,
       changedFiles: candidate.changedFiles,
+      isDraft: candidate.isDraft,
+      updatedDaysAgo: candidate.updatedDaysAgo,
       score
     });
   }
@@ -172,6 +177,10 @@ function analyzeCandidate(candidate) {
       tier: "D",
       score: candidate.score,
       confidence: "low",
+      commentEligibility: "skip",
+      comment_eligibility: "skip",
+      commentBlockers: ["analysis_error"],
+      comment_blockers: ["analysis_error"],
       whetherToComment: "no",
       behaviorDeltaSummary: "Agentdiff analysis failed for this open PR candidate.",
       suggestedHumanComment: "",
@@ -186,8 +195,9 @@ function analyzeCandidate(candidate) {
   const tier = tierFor({ candidate, report, findings, summary });
   const behaviorDeltaSummary = behaviorSummaryFor({ tier, candidate, summary });
   const confidence = confidenceFor({ tier, summary });
-  const whetherToComment = whetherToCommentFor({ tier, confidence, summary, candidate });
-  const suggestedHumanComment = draftCommentFor({ candidate, summary, tier, whetherToComment });
+  const eligibility = commentEligibilityFor({ tier, confidence, summary, candidate });
+  const whetherToComment = whetherToCommentFor(eligibility.commentEligibility);
+  const suggestedHumanComment = draftCommentFor({ candidate, summary, tier, commentEligibility: eligibility.commentEligibility });
 
   return {
     ...candidateSummary(candidate),
@@ -195,6 +205,10 @@ function analyzeCandidate(candidate) {
     tier,
     score: candidate.score + tierScore(tier),
     confidence,
+    commentEligibility: eligibility.commentEligibility,
+    comment_eligibility: eligibility.commentEligibility,
+    commentBlockers: eligibility.commentBlockers,
+    comment_blockers: eligibility.commentBlockers,
     whetherToComment,
     actionabilityCounts: countBy(findings.map((finding) => actionabilityForFinding(finding))),
     findingSummary: summary,
@@ -308,16 +322,41 @@ function confidenceFor({ tier, summary }) {
   return "low";
 }
 
-function whetherToCommentFor({ tier, confidence, summary, candidate }) {
-  const hasSpecificCapability = specificCapabilityCalls(summary.filter((finding) => finding.runtimePath)).length > 0;
-  const isDraftLike = /\b(wip|draft)\b|\[wip\]|\(wip\)/i.test(candidate.title ?? "");
-  if (tier === "A" && confidence === "high" && hasSpecificCapability && !isDraftLike) return "yes";
-  if (tier === "A" || tier === "B") return "maybe";
+function commentEligibilityFor({ tier, confidence, summary, candidate }) {
+  const blockers = [];
+  const runtimeFindings = summary.filter((finding) => finding.runtimePath);
+  const hasRuntimePath = runtimeFindings.length > 0 || candidate.changedFiles.some(isRuntimeBehaviorPath);
+  const hasSpecificCapability = specificCapabilityCalls(runtimeFindings).length > 0;
+  const onlyNonRuntimeSurfaces = summary.length > 0 && summary.every((finding) => !finding.runtimePath || finding.docsOrExamplePath);
+  const stale = Number(candidate.updatedDaysAgo ?? 0) >= 30;
+
+  if (candidate.isDraft || /\b(wip|draft)\b|\[wip\]|\(wip\)/i.test(candidate.title ?? "")) blockers.push("draft_pr");
+  if (isStackedOrDependentPr(candidate)) blockers.push("stacked_or_dependent_pr");
+  if (!hasSpecificCapability && hasOnlyGenericCapabilities(summary)) blockers.push("generic_capability_names_only");
+  if (onlyNonRuntimeSurfaces || (summary.length === 0 && !candidate.changedFiles.some(isRuntimeBehaviorPath))) blockers.push("non_runtime_surface");
+  if (stale) blockers.push("stale_pr");
+
+  if (blockers.includes("non_runtime_surface")) {
+    return { commentEligibility: "skip", commentBlockers: unique(blockers) };
+  }
+  if (tier === "A" && confidence === "high" && hasRuntimePath && hasSpecificCapability && blockers.length === 0) {
+    return { commentEligibility: "review_now", commentBlockers: [] };
+  }
+  if (tier === "A" || tier === "B") {
+    return { commentEligibility: "watch", commentBlockers: unique(blockers) };
+  }
+  if (blockers.length > 0) return { commentEligibility: "skip", commentBlockers: unique(blockers) };
+  return { commentEligibility: "skip", commentBlockers: [] };
+}
+
+function whetherToCommentFor(commentEligibility) {
+  if (commentEligibility === "review_now") return "yes";
+  if (commentEligibility === "watch") return "maybe";
   return "no";
 }
 
-function draftCommentFor({ candidate, summary, tier, whetherToComment }) {
-  if (whetherToComment === "no") return "";
+function draftCommentFor({ candidate, summary, tier, commentEligibility }) {
+  if (commentEligibility !== "review_now") return "";
   const runtimeFindings = summary.filter((finding) => finding.runtimePath);
   const specificAdded = specificCapabilityCalls(runtimeFindings).slice(0, 4);
   const added = specificAdded.length > 0 ? specificAdded : unique(runtimeFindings.flatMap((finding) => finding.addedHighRiskCalls ?? [])).slice(0, 4);
@@ -332,8 +371,19 @@ function draftCommentFor({ candidate, summary, tier, whetherToComment }) {
   if (capabilities.length === 0) capabilities.push(...candidate.changedFiles.slice(0, 3).map((file) => `changed \`${file}\``));
 
   const bullets = capabilities.slice(0, 4).map((item) => `* ${item}`).join("\n");
-  const lead = tier === "A" ? "one behavior delta I noticed while reading this PR" : "one possible behavior delta I noticed while reading this PR";
-  return `Hey - ${lead}:\n\n\`${behaviorSummaryFor({ tier, candidate, summary }).replace(/`/g, "'")}\`\n\nFor example, this appears to add/change:\n\n${bullets}\n\nThis may be fully intentional. I am not flagging it as a bug. It just seems like the kind of agent capability change that is worth making explicit in review, because normal CI will mostly tell you whether the code still runs, not what the agent can now do.\n\nI am building a small open-source CI check for this kind of agent behavior diff, so I am trying it manually on public PRs before automating anything.`;
+  return `Small review note: this PR appears to change an agent/runtime capability.\n\nConcrete behavior delta I noticed:\n${bullets}\n\nThis may be exactly intended. I am mentioning it because normal CI can show the code works, but not necessarily summarize what the agent/runtime can now do.`;
+}
+
+function isStackedOrDependentPr(candidate) {
+  const text = `${candidate.title ?? ""}\n${candidate.body ?? ""}`;
+  return /\b(stacked|stacked on|depends on|dependent|blocked by|builds on|base pr|parent pr|review\/merge|review this first|merge .* first)\b/i.test(text);
+}
+
+function hasOnlyGenericCapabilities(summary) {
+  const runtimeFindings = summary.filter((finding) => finding.runtimePath);
+  const calls = unique(runtimeFindings.flatMap((finding) => finding.addedHighRiskCalls ?? []));
+  if (calls.length === 0) return true;
+  return calls.every((callName) => !isSpecificCapabilityCall(callName));
 }
 
 function candidateSummary(candidate) {
@@ -342,8 +392,10 @@ function candidateSummary(candidate) {
     pr: candidate.number,
     title: candidate.title,
     url: candidate.url,
+    isDraft: candidate.isDraft,
     createdAt: candidate.createdAt,
     updatedAt: candidate.updatedAt,
+    updatedDaysAgo: candidate.updatedDaysAgo,
     baseSha: candidate.baseSha,
     headSha: candidate.headSha,
     changedFiles: candidate.changedFiles
@@ -353,6 +405,7 @@ function candidateSummary(candidate) {
 function summarize(result) {
   const tierCounts = countBy(result.analyzed.map((item) => item.tier));
   const commentCounts = countBy(result.analyzed.map((item) => item.whetherToComment));
+  const commentEligibilityCounts = countBy(result.analyzed.map((item) => item.commentEligibility));
   return {
     reposInspected: result.repos.length,
     openPrsInspected: sum(result.repos, (repo) => repo.openPrsInspected),
@@ -368,6 +421,11 @@ function summarize(result) {
       yes: commentCounts.yes ?? 0,
       maybe: commentCounts.maybe ?? 0,
       no: commentCounts.no ?? 0
+    },
+    commentEligibilityCounts: {
+      review_now: commentEligibilityCounts.review_now ?? 0,
+      watch: commentEligibilityCounts.watch ?? 0,
+      skip: commentEligibilityCounts.skip ?? 0
     }
   };
 }
@@ -389,6 +447,7 @@ function renderReport(result) {
   lines.push(`candidate PRs found: ${result.summary.candidatePrsFound}`);
   lines.push(`candidate PRs analyzed: ${result.summary.candidatePrsAnalyzed}`);
   lines.push(`A/B/C/D: ${result.summary.tierCounts.A}/${result.summary.tierCounts.B}/${result.summary.tierCounts.C}/${result.summary.tierCounts.D}`);
+  lines.push(`comment eligibility review_now/watch/skip: ${result.summary.commentEligibilityCounts.review_now}/${result.summary.commentEligibilityCounts.watch}/${result.summary.commentEligibilityCounts.skip}`);
   lines.push(`comment yes/maybe/no: ${result.summary.commentCounts.yes}/${result.summary.commentCounts.maybe}/${result.summary.commentCounts.no}`);
   lines.push("");
   lines.push("## Top Manual Review Candidates");
@@ -402,14 +461,18 @@ function renderReport(result) {
       lines.push(`### ${item.tier}-tier: ${item.repo}#${item.pr} - ${item.title}`);
       lines.push("");
       lines.push(`URL: ${item.url}`);
+      lines.push(`draft: ${item.isDraft ? "yes" : "no"}`);
       lines.push(`created: ${item.createdAt ?? "unknown"}`);
       lines.push(`updated: ${item.updatedAt ?? "unknown"}`);
+      lines.push(`updated days ago: ${item.updatedDaysAgo ?? "unknown"}`);
       lines.push(`base SHA: ${item.baseSha ?? "unknown"}`);
       lines.push(`head SHA: ${item.headSha ?? "unknown"}`);
       lines.push(`changed files: ${item.changedFiles.slice(0, 8).join(", ")}`);
       lines.push(`agentdiff status: ${item.status}`);
       lines.push(`behavior delta summary: ${item.behaviorDeltaSummary}`);
       lines.push(`confidence: ${item.confidence}`);
+      lines.push(`comment eligibility: ${item.commentEligibility}`);
+      lines.push(`comment blockers: ${(item.commentBlockers ?? []).join(", ") || "none"}`);
       lines.push(`whether to comment: ${item.whetherToComment}`);
       lines.push(`why this is only a behavior-delta note: ${item.whyBehaviorDeltaOnly}`);
       lines.push("");
@@ -431,11 +494,12 @@ function renderReport(result) {
     }
   }
 
-  lines.push("## Weak / No-Comment Candidates");
+  lines.push("## Skip Candidates");
   lines.push("");
-  for (const item of result.analyzed.filter((entry) => entry.whetherToComment === "no").slice(0, 10)) {
+  for (const item of result.analyzed.filter((entry) => entry.commentEligibility === "skip").slice(0, 10)) {
     lines.push(`- ${item.repo}#${item.pr}: ${item.title}`);
-    lines.push(`  reason: ${item.behaviorDeltaSummary}`);
+    lines.push(`  blockers: ${(item.commentBlockers ?? []).join(", ") || "none"}`);
+    lines.push(`  behavior delta: ${item.behaviorDeltaSummary}`);
   }
   lines.push("");
   lines.push("## Repo Table");
@@ -512,6 +576,13 @@ function readOption(name) {
   return process.argv[index + 1];
 }
 
+function daysAgo(dateString) {
+  if (!dateString) return undefined;
+  const timestamp = Date.parse(dateString);
+  if (Number.isNaN(timestamp)) return undefined;
+  return Math.max(0, Math.floor((Date.now() - timestamp) / (24 * 60 * 60 * 1000)));
+}
+
 function countBy(items) {
   return items.reduce((counts, item) => {
     counts[item] = (counts[item] ?? 0) + 1;
@@ -545,6 +616,6 @@ function tierScore(tier) {
   return { A: 1000, B: 500, C: 100, D: 0 }[tier] ?? 0;
 }
 
-function commentRank(value) {
-  return { yes: 0, maybe: 1, no: 2 }[value] ?? 9;
+function commentEligibilityRank(value) {
+  return { review_now: 0, watch: 1, skip: 2 }[value] ?? 9;
 }
