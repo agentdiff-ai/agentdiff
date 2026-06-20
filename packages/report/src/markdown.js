@@ -70,6 +70,8 @@ function formatChangedFiles(files) {
 
 function renderClassificationReport(report) {
   const lines = [];
+  const groupedFindings = groupClassificationFindings(report);
+  const actionabilityCounts = countGroupedFindings(groupedFindings);
   lines.push("# agentdiff classification report");
   lines.push("");
   lines.push(`status: ${report.status}`);
@@ -78,6 +80,10 @@ function renderClassificationReport(report) {
   lines.push(`diff-aware findings: ${report.diff_aware_findings.length}`);
   lines.push(`map drift findings: ${report.map_drift.length}`);
   lines.push(`suppressed findings: ${report.suppressed_findings?.length ?? 0}`);
+  lines.push(`action_required: ${actionabilityCounts.action_required}`);
+  lines.push(`review_recommended: ${actionabilityCounts.review_recommended}`);
+  lines.push(`context_only: ${actionabilityCounts.context_only}`);
+  lines.push(`likely_noise: ${actionabilityCounts.likely_noise}`);
   lines.push(`estimated cost: $${report.cost.estimated_cost_usd.toFixed(4)}`);
   lines.push(`actual cost: $${report.cost.actual_cost_usd.toFixed(4)}`);
   lines.push("");
@@ -91,8 +97,8 @@ function renderClassificationReport(report) {
     lines.push("");
   }
 
-  if (report.diff_aware_findings.length === 0 && report.map_drift.length === 0) {
-    lines.push("## top findings");
+  if (allGroupedFindings(groupedFindings).length === 0) {
+    lines.push("## action required");
     lines.push("");
     lines.push("No unsuppressed agent-related changed surfaces detected.");
     lines.push("");
@@ -100,79 +106,23 @@ function renderClassificationReport(report) {
     return lines.join("\n");
   }
 
-  if (report.diff_aware_findings.length > 0) {
-    lines.push("## diff-aware findings");
-    lines.push("");
-
-    report.diff_aware_findings.forEach((finding, index) => {
-      lines.push(`### ${index + 1}. ${finding.title}`);
-      lines.push("");
-      lines.push(`file: ${finding.path}`);
-      lines.push(`severity: ${finding.severity}`);
-      lines.push(`type: ${finding.finding_type}`);
-      lines.push("");
-      lines.push("added calls:");
-      for (const call of finding.added_calls) {
-        const suffix = finding.added_high_risk_calls.includes(call) ? " (high-risk)" : "";
-        lines.push(`- ${call}${suffix}`);
-      }
-      if (finding.added_calls.length === 0) {
-        lines.push("- none");
-      }
-      lines.push("");
-      lines.push("removed calls:");
-      for (const call of finding.removed_calls) {
-        const suffix = finding.removed_safer_calls.includes(call) ? " (safer/guardrail)" : "";
-        lines.push(`- ${call}${suffix}`);
-      }
-      if (finding.removed_calls.length === 0) {
-        lines.push("- none");
-      }
-      lines.push("");
-      lines.push(`why it matters: ${finding.reason}`);
-      lines.push("");
-      lines.push("evidence:");
-      for (const item of finding.evidence) {
-        lines.push(`- ${item}`);
-      }
-      lines.push("");
-      renderExplanation(lines, finding);
-      renderSuggestedSuppression(lines, finding);
-      lines.push(`recommendation: ${finding.recommendation}`);
-      lines.push("");
-    });
-  }
-
-  lines.push("## top findings");
-  lines.push("");
-
-  report.map_drift.forEach((finding, index) => {
-    lines.push(`### ${index + 1}. ${finding.title ?? finding.path}`);
-    lines.push("");
-    lines.push(`file: ${finding.path}`);
-    lines.push(`severity: ${finding.severity}`);
-    lines.push(`type: ${finding.finding_type}`);
-    lines.push(`label: ${finding.label}`);
-    lines.push(`risk: ${finding.risk.length ? finding.risk.join(", ") : "none"}`);
-    if (finding.reachability_provenance) {
-      lines.push(`reachability provenance: ${finding.reachability_provenance}`);
-    }
-    if (finding.actionability) {
-      lines.push(`actionability: ${finding.actionability}`);
-    }
-    if (typeof finding.reachable_from_entrypoint === "boolean") {
-      lines.push(`reachable from entrypoint: ${finding.reachable_from_entrypoint ? "yes" : "no"}`);
-    }
-    lines.push("");
-    lines.push("evidence:");
-    for (const item of finding.evidence) {
-      lines.push(`- ${item}`);
-    }
-    lines.push("");
-    renderExplanation(lines, finding);
-    renderSuggestedSuppression(lines, finding);
-    lines.push(`recommendation: ${finding.recommendation}`);
-    lines.push("");
+  renderActionabilityGroup(lines, "Action required", "action_required", groupedFindings.action_required, {
+    emptyText: "No action-required findings. This PR has no urgent agentdiff finding.",
+    collapsed: false
+  });
+  renderActionabilityGroup(lines, "Review recommended", "review_recommended", groupedFindings.review_recommended, {
+    emptyText: "No review-recommended findings.",
+    collapsed: false
+  });
+  renderActionabilityGroup(lines, "Context only", "context_only", groupedFindings.context_only, {
+    emptyText: "No context-only findings.",
+    collapsed: true,
+    note: "Context-only findings are shown for traceability. They do not mean this PR is unsafe."
+  });
+  renderActionabilityGroup(lines, "Likely noise", "likely_noise", groupedFindings.likely_noise, {
+    emptyText: "No likely-noise findings.",
+    collapsed: true,
+    note: "Likely-noise findings are low-priority docs/config/generated/archive signals and do not mean this PR is unsafe."
   });
 
   lines.push("## changed surfaces");
@@ -189,6 +139,142 @@ function renderClassificationReport(report) {
   renderSuppressedFindings(lines, report);
 
   return lines.join("\n");
+}
+
+function groupClassificationFindings(report) {
+  const grouped = {
+    action_required: [],
+    review_recommended: [],
+    context_only: [],
+    likely_noise: []
+  };
+
+  for (const finding of [...(report.diff_aware_findings ?? []), ...(report.map_drift ?? [])]) {
+    grouped[actionabilityForFinding(finding)].push(finding);
+  }
+
+  return grouped;
+}
+
+function allGroupedFindings(grouped) {
+  return Object.values(grouped).flat();
+}
+
+function countGroupedFindings(grouped) {
+  return {
+    action_required: grouped.action_required.length,
+    review_recommended: grouped.review_recommended.length,
+    context_only: grouped.context_only.length,
+    likely_noise: grouped.likely_noise.length
+  };
+}
+
+function actionabilityForFinding(finding) {
+  if (["action_required", "review_recommended", "context_only", "likely_noise"].includes(finding.actionability)) {
+    return finding.actionability;
+  }
+  if (finding.severity === "critical" || finding.severity === "high") return "action_required";
+  if (finding.severity === "medium") return "review_recommended";
+  return "context_only";
+}
+
+function renderActionabilityGroup(lines, title, actionability, findings, { emptyText, collapsed, note } = {}) {
+  const heading = `${title} (${findings.length})`;
+  if (collapsed && findings.length > 0) {
+    lines.push(`<details>`);
+    lines.push(`<summary>${heading}</summary>`);
+    lines.push("");
+    if (note) {
+      lines.push(note);
+      lines.push("");
+    }
+  } else {
+    lines.push(`## ${heading}`);
+    lines.push("");
+    if (note && findings.length > 0) {
+      lines.push(note);
+      lines.push("");
+    }
+  }
+
+  if (findings.length === 0) {
+    lines.push(emptyText);
+    lines.push("");
+  } else {
+    findings.forEach((finding, index) => {
+      renderClassificationFinding(lines, finding, index + 1, actionability);
+    });
+  }
+
+  if (collapsed && findings.length > 0) {
+    lines.push("</details>");
+    lines.push("");
+  }
+}
+
+function renderClassificationFinding(lines, finding, index, actionability) {
+  lines.push(`### ${index}. ${finding.title ?? finding.path}`);
+  lines.push("");
+  lines.push(`file: ${finding.path}`);
+  lines.push(`severity: ${finding.severity}`);
+  lines.push(`type: ${finding.finding_type}`);
+  lines.push(`actionability: ${finding.actionability ?? actionability}`);
+
+  if (isDiffAwareFinding(finding)) {
+    renderDiffAwareFinding(lines, finding);
+  } else {
+    renderMapDriftFinding(lines, finding);
+  }
+
+  lines.push("");
+  renderExplanation(lines, finding);
+  renderSuggestedSuppression(lines, finding);
+  lines.push(`recommendation: ${finding.recommendation}`);
+  lines.push("");
+}
+
+function isDiffAwareFinding(finding) {
+  return Array.isArray(finding.added_calls) || Array.isArray(finding.removed_calls);
+}
+
+function renderDiffAwareFinding(lines, finding) {
+  lines.push("");
+  lines.push("added calls:");
+  for (const call of finding.added_calls ?? []) {
+    const suffix = (finding.added_high_risk_calls ?? []).includes(call) ? " (high-risk)" : "";
+    lines.push(`- ${call}${suffix}`);
+  }
+  if ((finding.added_calls ?? []).length === 0) lines.push("- none");
+  lines.push("");
+  lines.push("removed calls:");
+  for (const call of finding.removed_calls ?? []) {
+    const suffix = (finding.removed_safer_calls ?? []).includes(call) ? " (safer/guardrail)" : "";
+    lines.push(`- ${call}${suffix}`);
+  }
+  if ((finding.removed_calls ?? []).length === 0) lines.push("- none");
+  lines.push("");
+  lines.push(`why it matters: ${finding.reason}`);
+  lines.push("");
+  lines.push("evidence:");
+  for (const item of finding.evidence ?? []) {
+    lines.push(`- ${item}`);
+  }
+}
+
+function renderMapDriftFinding(lines, finding) {
+  lines.push(`label: ${finding.label}`);
+  lines.push(`risk: ${finding.risk?.length ? finding.risk.join(", ") : "none"}`);
+  if (finding.reachability_provenance) {
+    lines.push(`reachability provenance: ${finding.reachability_provenance}`);
+  }
+  if (typeof finding.reachable_from_entrypoint === "boolean") {
+    lines.push(`reachable from entrypoint: ${finding.reachable_from_entrypoint ? "yes" : "no"}`);
+  }
+  lines.push("");
+  lines.push("evidence:");
+  for (const item of finding.evidence ?? []) {
+    lines.push(`- ${item}`);
+  }
 }
 
 function renderExplanation(lines, finding) {

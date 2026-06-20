@@ -242,6 +242,7 @@ async function scan({ root, out }) {
   console.log(`review_recommended findings: ${map.scan.actionability_counts.review_recommended ?? 0}`);
   console.log(`context_only findings: ${map.scan.actionability_counts.context_only ?? 0}`);
   console.log(`likely_noise findings: ${map.scan.actionability_counts.likely_noise ?? 0}`);
+  printTopActionabilityExamples(map);
   console.log(`agent surfaces: ${map.surfaces.length}`);
   console.log(`agents: ${map.agents.length}`);
   console.log(`map: ${outPath}`);
@@ -1266,6 +1267,32 @@ function countBy(items, key) {
 
 function sumCounts(counts, keys) {
   return keys.reduce((total, key) => total + Number(counts?.[key] ?? 0), 0);
+}
+
+function printTopActionabilityExamples(map) {
+  const actionRequired = (map.surfaces ?? []).filter((surface) => surface.actionability === "action_required").slice(0, 5);
+  if (actionRequired.length > 0) {
+    console.log("top action_required surfaces:");
+    for (const surface of actionRequired) {
+      console.log(`- ${surface.path} (${surface.label}/${surface.surface_category ?? "uncategorized"}; risk=${surface.risk?.join(", ") || "none"})`);
+    }
+  } else {
+    console.log("top action_required surfaces: none");
+  }
+
+  const reviewRecommended = (map.surfaces ?? []).filter((surface) => surface.actionability === "review_recommended").slice(0, 3);
+  if (reviewRecommended.length > 0) {
+    console.log("top review_recommended surfaces:");
+    for (const surface of reviewRecommended) {
+      console.log(`- ${surface.path} (${surface.label}/${surface.surface_category ?? "uncategorized"}; risk=${surface.risk?.join(", ") || "none"})`);
+    }
+  }
+
+  const contextCount = Number(map.scan?.actionability_counts?.context_only ?? 0);
+  const noiseCount = Number(map.scan?.actionability_counts?.likely_noise ?? 0);
+  if (contextCount > 0 || noiseCount > 0) {
+    console.log(`context/noise findings are not urgent: context_only=${contextCount}, likely_noise=${noiseCount}`);
+  }
 }
 
 function starterMap() {
