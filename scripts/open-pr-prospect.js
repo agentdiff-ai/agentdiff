@@ -10,6 +10,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const outRoot = path.join(repoRoot, ".agentdiff", "open-pr-prospect", "latest");
 const cacheRoot = path.join(repoRoot, ".agentdiff", "open-pr-prospect", "cache");
+const manualOutcomesPath = path.join(repoRoot, ".agentdiff", "open-pr-prospect", "manual-outcomes.json");
 const runRoot = path.join(os.tmpdir(), `agentdiff-open-pr-prospect-${new Date().toISOString().replace(/[:.]/g, "-")}`);
 const started = Date.now();
 const seedRepos = readSeedRepos();
@@ -41,7 +42,7 @@ fs.mkdirSync(runRoot, { recursive: true });
 
 const previous = options.resume ? readPreviousResults() : null;
 const previouslyAnalyzed = new Map((previous?.analyzed ?? []).map((item) => [analysisKey(item), item]));
-const manuallyReviewed = readManuallyReviewedPrs();
+const manualOutcomes = readManualOutcomes();
 const selectedRepos = seedRepos.slice(options.start, options.start + options.maxRepos);
 
 const results = {
@@ -63,6 +64,7 @@ const results = {
   candidates: [],
   analyzed: [],
   reusedAnalyzed: 0,
+  manualOutcomesApplied: [],
   stoppedBecause: null
 };
 
@@ -96,14 +98,11 @@ for (const candidate of candidateQueue) {
 
   const key = analysisKey(candidate);
   if (previouslyAnalyzed.has(key)) {
-    results.analyzed.push({ ...previouslyAnalyzed.get(key), reusedFromPriorRun: true });
+    const reused = applyManualOutcomeToAnalyzed({ ...previouslyAnalyzed.get(key), reusedFromPriorRun: true }, candidate);
+    results.analyzed.push(reused);
     results.reusedAnalyzed += 1;
     continue;
   }
-  if (manuallyReviewed.has(`${candidate.repo}#${candidate.number}`)) {
-    continue;
-  }
-
   console.log(`analyzing ${candidate.repo}#${candidate.number}`);
   results.analyzed.push(analyzeCandidate(candidate));
 }
@@ -236,10 +235,21 @@ function analyzeCandidate(candidate) {
   const behaviorDeltaSummary = behaviorSummaryFor({ tier: behaviorDeltaTier, candidate, summary });
   const confidence = confidenceFor({ tier: behaviorDeltaTier, summary });
   const positiveSignals = positiveSignalsFor({ candidate, summary });
-  const blockers = commentBlockersFor({ candidate, summary, behaviorDeltaTier, confidence, positiveSignals, behaviorDeltaSummary });
+  const manualOutcome = manualOutcomes.get(prKey(candidate));
+  const blockers = commentBlockersFor({ candidate, summary, behaviorDeltaTier, confidence, positiveSignals, behaviorDeltaSummary, manualOutcome });
   const commentUsefulnessScore = usefulnessScoreFor({ candidate, summary, behaviorDeltaTier, confidence, positiveSignals, blockers });
-  const commentEligibility = commentEligibilityFor({ behaviorDeltaTier, confidence, positiveSignals, blockers, commentUsefulnessScore });
+  const commentEligibility = commentEligibilityFor({ behaviorDeltaTier, confidence, positiveSignals, blockers, commentUsefulnessScore, manualOutcome });
   const finalCommentDraft = draftCommentFor({ candidate, summary, behaviorDeltaTier, commentEligibility });
+  if (manualOutcome) {
+    results.manualOutcomesApplied.push({
+      repo: candidate.repo,
+      pr: candidate.number,
+      decision: manualOutcome.decision,
+      reasons: manualOutcome.reasons ?? [],
+      commentEligibility,
+      blockers
+    });
+  }
 
   return {
     ...candidateSummary(candidate),
@@ -251,6 +261,8 @@ function analyzeCandidate(candidate) {
     comment_eligibility: commentEligibility,
     commentBlockers: blockers,
     comment_blockers: blockers,
+    manualOutcome: manualOutcome?.decision,
+    manualOutcomeReasons: manualOutcome?.reasons ?? [],
     positiveSignals,
     commentUsefulnessScore,
     behaviorDeltaSummary,
@@ -258,6 +270,41 @@ function analyzeCandidate(candidate) {
     findingSummary: summary.slice(0, 12),
     finalCommentDraft,
     suggestedHumanComment: finalCommentDraft
+  };
+}
+
+function applyManualOutcomeToAnalyzed(item, candidate) {
+  const manualOutcome = manualOutcomes.get(prKey(candidate));
+  if (!manualOutcome) return item;
+  const blockers = unique([
+    ...(item.commentBlockers ?? item.comment_blockers ?? []),
+    "previously_reviewed",
+    ...(manualOutcome.reasons ?? [])
+  ]);
+  const commentEligibility =
+    manualOutcome.decision === "comment_candidate"
+      ? (item.commentEligibility ?? item.comment_eligibility ?? "review_now")
+      : blockers.includes("non_runtime_surface") || blockers.includes("low_confidence_delta")
+        ? "skip"
+        : "watch";
+  results.manualOutcomesApplied.push({
+    repo: candidate.repo,
+    pr: candidate.number,
+    decision: manualOutcome.decision,
+    reasons: manualOutcome.reasons ?? [],
+    commentEligibility,
+    blockers
+  });
+  return {
+    ...item,
+    commentEligibility,
+    comment_eligibility: commentEligibility,
+    commentBlockers: blockers,
+    comment_blockers: blockers,
+    manualOutcome: manualOutcome.decision,
+    manualOutcomeReasons: manualOutcome.reasons ?? [],
+    finalCommentDraft: commentEligibility === "review_now" ? item.finalCommentDraft : "",
+    suggestedHumanComment: commentEligibility === "review_now" ? item.suggestedHumanComment : ""
   };
 }
 
@@ -384,7 +431,7 @@ function positiveSignalsFor({ candidate, summary }) {
   return unique(signals);
 }
 
-function commentBlockersFor({ candidate, summary, behaviorDeltaTier, confidence, positiveSignals, behaviorDeltaSummary }) {
+function commentBlockersFor({ candidate, summary, behaviorDeltaTier, confidence, positiveSignals, behaviorDeltaSummary, manualOutcome }) {
   const blockers = [];
   const runtimeFindings = summary.filter((finding) => finding.runtimePath);
   const stale = Number(candidate.updatedDaysAgo ?? 0) > options.sinceDays;
@@ -395,6 +442,10 @@ function commentBlockersFor({ candidate, summary, behaviorDeltaTier, confidence,
   if (summary.length > 0 && summary.every((finding) => !finding.runtimePath || finding.docsOrExamplePath)) blockers.push("non_runtime_surface");
   if (!positiveSignals.includes("specific_capability_names") && hasOnlyGenericCapabilities(summary)) blockers.push("generic_capability_names_only");
   if (authorAlreadyExplainsDelta(candidate, runtimeFindings, behaviorDeltaSummary)) blockers.push("author_already_explained_delta_clearly");
+  if (manualOutcome) {
+    blockers.push("previously_reviewed");
+    blockers.push(...(manualOutcome.reasons ?? []));
+  }
   if (isGiantRefactor(candidate, runtimeFindings)) blockers.push("giant_refactor_or_framework_internal");
   if ((candidate.commentsCount + candidate.reviewCommentsCount) >= 12) blockers.push("noisy_thread");
   if (behaviorDeltaTier === "D" || confidence === "low") blockers.push("low_confidence_delta");
@@ -439,7 +490,11 @@ function usefulnessScoreFor({ candidate, summary, behaviorDeltaTier, confidence,
   return Math.max(0, score);
 }
 
-function commentEligibilityFor({ behaviorDeltaTier, confidence, positiveSignals, blockers, commentUsefulnessScore }) {
+function commentEligibilityFor({ behaviorDeltaTier, confidence, positiveSignals, blockers, commentUsefulnessScore, manualOutcome }) {
+  if (manualOutcome && manualOutcome.decision !== "comment_candidate") {
+    if (blockers.includes("non_runtime_surface") || blockers.includes("low_confidence_delta")) return "skip";
+    return "watch";
+  }
   if (blockers.includes("non_runtime_surface") || blockers.includes("low_confidence_delta")) return "skip";
   if (
     behaviorDeltaTier === "A" &&
@@ -473,14 +528,47 @@ function draftCommentFor({ candidate, summary, behaviorDeltaTier, commentEligibi
 }
 
 function authorAlreadyExplainsDelta(candidate, runtimeFindings, behaviorDeltaSummary) {
-  const body = String(candidate.body ?? "").toLowerCase();
-  if (body.length < 500) return false;
+  const rawBody = String(candidate.body ?? "");
+  const text = `${candidate.title ?? ""}\n${rawBody}`.toLowerCase();
+  if (text.length < 500) return false;
+
   const calls = specificCapabilityCalls(runtimeFindings).map((call) => call.toLowerCase());
-  const mentionedCalls = calls.filter((call) => body.includes(call.toLowerCase())).length;
-  const structured = /\b(before|after|now|what changed|summary|key changes|how it works|verification)\b/i.test(candidate.body ?? "");
-  const ownershipWords = /\b(runtime|subscription|approval|resume|tool|agent|workflow|memory|thread|stream|api|route|worker|schedule)\b/i.test(candidate.body ?? "");
+  const mentionedCalls = calls.filter((call) => text.includes(call)).length;
+  const structured = /\b(before|after|now|what changed|summary|key changes|how it works|verification|testing|scope|flow|ingest contract|routing|worker)\b/i.test(rawBody);
+  const ownershipWords = /\b(runtime|subscription|approval|resume|tool|agent|workflow|memory|thread|stream|api|route|routing|worker|schedule|channel|webhook|ingest|send endpoint|reply)\b/i.test(rawBody);
   if (mentionedCalls > 0 && structured) return true;
-  return structured && ownershipWords && body.length > 1200 && /before|now|changed|fixes|adds|routes|preserved|updated/i.test(candidate.body ?? "");
+
+  const categories = capabilityCategoriesFor(calls, candidate);
+  const categoryHits = categories.filter((category) => category.pattern.test(text)).length;
+  const explainsFlow = /\b(before|after|now|changed|fixes|adds|routes?|routing|forwards?|dispatch|delivered|worker|endpoint|ownership|handled|verified|thread|subscription|approval|resume)\b/i.test(rawBody);
+  return structured && ownershipWords && explainsFlow && categoryHits >= 2;
+}
+
+function capabilityCategoriesFor(calls, candidate) {
+  const names = `${calls.join(" ")} ${candidate.title ?? ""} ${(candidate.changedFiles ?? []).join(" ")}`.toLowerCase();
+  const categories = [];
+  if (/whatsapp|sendwhatsapp|channel|ingest|concierge/.test(names)) {
+    categories.push({ name: "whatsapp_channel", pattern: /\b(whatsapp|concierge|channel|inbound|ingest|phone|routing|worker|send endpoint|reply)\b/i });
+  }
+  if (/resume|stream|approval|toolapproval|sendstreamresume/.test(names)) {
+    categories.push({ name: "stream_resume", pattern: /\b(resume|stream|subscription|subscribed|approval|decline|tool|run id|boundary)\b/i });
+  }
+  if (/heartbeat|schedule/.test(names)) {
+    categories.push({ name: "scheduled_agent", pattern: /\b(heartbeat|schedule|scheduled|cron|worker|fire|check-in|signal)\b/i });
+  }
+  if (/github|gitlab|gist|issue|pull|review|label/.test(names)) {
+    categories.push({ name: "code_hosting_tool", pattern: /\b(github|gitlab|gist|issue|pull request|review|label|comment|workflow)\b/i });
+  }
+  if (/remote|deploy|sandbox|shell|northflank/.test(names)) {
+    categories.push({ name: "remote_execution", pattern: /\b(remote|deploy|sandbox|shell|filesystem|provider|session|manifest)\b/i });
+  }
+  if (/memory|state|checkpoint|thread|session/.test(names)) {
+    categories.push({ name: "state_or_memory", pattern: /\b(memory|state|checkpoint|thread|session|persist|storage)\b/i });
+  }
+  if (/send|email|slack|outbound|message/.test(names)) {
+    categories.push({ name: "external_message", pattern: /\b(send|sent|outbound|message|email|slack|reply|deliver)\b/i });
+  }
+  return categories;
 }
 
 function isGiantRefactor(candidate, runtimeFindings) {
@@ -551,6 +639,7 @@ function writeOutputs(result) {
   fs.writeFileSync(path.join(outRoot, "review-now.md"), renderQueue("Review Now", ranked(result.analyzed).filter((item) => item.commentEligibility === "review_now")));
   fs.writeFileSync(path.join(outRoot, "watch.md"), renderQueue("Watch", ranked(result.analyzed).filter((item) => item.commentEligibility === "watch")));
   fs.writeFileSync(path.join(outRoot, "skip-summary.md"), renderSkipSummary(result));
+  fs.writeFileSync(path.join(outRoot, "manual-outcomes-applied.md"), renderManualOutcomesApplied(result));
 }
 
 function renderRankedCandidates(result) {
@@ -605,6 +694,10 @@ function renderItems(items) {
     lines.push(`updated days ago: ${item.updatedDaysAgo ?? "unknown"}`);
     lines.push(`positive signals: ${(item.positiveSignals ?? []).join(", ") || "none"}`);
     lines.push(`blockers: ${(item.commentBlockers ?? []).join(", ") || "none"}`);
+    if (item.manualOutcome) {
+      lines.push(`manual outcome: ${item.manualOutcome}`);
+      lines.push(`manual outcome reasons: ${(item.manualOutcomeReasons ?? []).join(", ") || "none"}`);
+    }
     lines.push(`behavior delta: ${item.behaviorDeltaSummary}`);
     lines.push(`changed files: ${(item.changedFiles ?? []).slice(0, 8).join(", ")}`);
     if (item.findingSummary?.length > 0) {
@@ -643,6 +736,48 @@ function renderSkipSummary(result) {
   lines.push("## Examples");
   lines.push("");
   lines.push(renderItems(skip.slice(0, 15)));
+  return `${lines.join("\n")}\n`;
+}
+
+function renderManualOutcomesApplied(result) {
+  const lines = ["# Manual Outcomes Applied", ""];
+  const applied = result.manualOutcomesApplied ?? [];
+  const authorDowngrades = ranked(result.analyzed).filter((item) => (item.commentBlockers ?? []).includes("author_already_explained_delta_clearly"));
+  const reviewNow = ranked(result.analyzed).filter((item) => item.commentEligibility === "review_now");
+
+  lines.push("## Previously Reviewed PRs Applied");
+  lines.push("");
+  if (applied.length === 0) {
+    lines.push("No manual outcomes matched this run.");
+  } else {
+    for (const item of applied) {
+      lines.push(`- ${item.repo}#${item.pr}: ${item.decision}; reasons: ${(item.reasons ?? []).join(", ") || "none"}; eligibility: ${item.commentEligibility}; blockers: ${(item.blockers ?? []).join(", ") || "none"}`);
+    }
+  }
+  lines.push("");
+  lines.push("## Downgraded Because Author Already Explained Delta");
+  lines.push("");
+  if (authorDowngrades.length === 0) {
+    lines.push("No author-explained downgrades in this run.");
+  } else {
+    for (const item of authorDowngrades.slice(0, 20)) {
+      lines.push(`- ${item.repo}#${item.pr}: ${item.title}`);
+      lines.push(`  eligibility: ${item.commentEligibility}; manual outcome: ${item.manualOutcome ?? "none"}`);
+      lines.push(`  delta: ${item.behaviorDeltaSummary}`);
+    }
+  }
+  lines.push("");
+  lines.push("## Still Review Now");
+  lines.push("");
+  if (reviewNow.length === 0) {
+    lines.push("No review_now candidates remain.");
+  } else {
+    for (const item of reviewNow.slice(0, 10)) {
+      lines.push(`- ${item.repo}#${item.pr}: ${item.title}`);
+      lines.push(`  score: ${item.commentUsefulnessScore}; delta: ${item.behaviorDeltaSummary}`);
+    }
+  }
+  lines.push("");
   return `${lines.join("\n")}\n`;
 }
 
@@ -717,18 +852,10 @@ function readPreviousResults() {
   return readJson(filePath);
 }
 
-function readManuallyReviewedPrs() {
-  const reviewed = new Set();
-  const watchlistDir = path.join(repoRoot, ".agentdiff", "open-pr-watchlist", "latest");
-  if (!fs.existsSync(watchlistDir)) return reviewed;
-  for (const entry of fs.readdirSync(watchlistDir)) {
-    if (!/^manual-comment-review.*\.md$/i.test(entry)) continue;
-    const text = fs.readFileSync(path.join(watchlistDir, entry), "utf8");
-    for (const match of text.matchAll(/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/g)) {
-      reviewed.add(`${match[1]}#${match[2]}`);
-    }
-  }
-  return reviewed;
+function readManualOutcomes() {
+  const data = readJson(manualOutcomesPath);
+  const outcomes = Array.isArray(data?.outcomes) ? data.outcomes : [];
+  return new Map(outcomes.map((outcome) => [`${outcome.repo}#${outcome.pr}`, outcome]));
 }
 
 function readOption(name) {
@@ -776,6 +903,10 @@ function reviewNowCount(items) {
 
 function analysisKey(candidate) {
   return `${candidate.repo}#${candidate.number ?? candidate.pr}@${candidate.headSha ?? "unknown"}`;
+}
+
+function prKey(candidate) {
+  return `${candidate.repo}#${candidate.number ?? candidate.pr}`;
 }
 
 function hash(value) {
