@@ -9,6 +9,7 @@ node_modules/
 .agentdiff/agent-zoo-live/
 .agentdiff/pr-mining/
 .agentdiff/open-pr-watchlist/
+.agentdiff/open-pr-prospect/
 .DS_Store
 dist/
 examples/remotion-demo/dist/
