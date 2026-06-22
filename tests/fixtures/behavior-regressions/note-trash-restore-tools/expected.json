@@ -1,0 +1,14 @@
+{
+  "title": "note agent gains trash and restore tools",
+  "expected_status": "action_required",
+  "expected_finding": {
+    "path": "src/agent.js",
+    "added_high_risk_calls": ["deleteNote"],
+    "removed_safer_calls": ["reviewNoteDeletion"],
+    "before_behavior": "The agent reviewed a note deletion request before changing files.",
+    "after_behavior": "The agent deletes notes and restores notes from trash directly.",
+    "changed_boundary": "state_mutation",
+    "risk_evidence": ["deleteNote"],
+    "why_normal_ci_misses_it": "The test suite can pass while the note agent gains file mutation and restore behavior."
+  }
+}

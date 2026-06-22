@@ -1,0 +1,14 @@
+{
+  "title": "workflow agent gains scheduling mutation tools",
+  "expected_status": "action_required",
+  "expected_finding": {
+    "path": "src/agent.js",
+    "added_high_risk_calls": ["updateSchedule", "deleteWorkflow"],
+    "removed_safer_calls": ["validateWorkflowPlan"],
+    "before_behavior": "The agent validated a workflow plan and returned review output.",
+    "after_behavior": "The agent creates workflows, updates schedules, and deletes workflows.",
+    "changed_boundary": "autonomy",
+    "risk_evidence": ["updateSchedule", "deleteWorkflow"],
+    "why_normal_ci_misses_it": "The PR can pass tests while changing from workflow review to scheduled autonomous workflow mutation."
+  }
+}

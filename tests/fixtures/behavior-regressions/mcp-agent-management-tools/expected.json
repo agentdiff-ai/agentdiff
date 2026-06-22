@@ -1,0 +1,14 @@
+{
+  "title": "MCP toolkit gains create/delete agent tools",
+  "expected_status": "action_required",
+  "expected_finding": {
+    "path": "src/agent.js",
+    "added_high_risk_calls": ["deleteAgent"],
+    "removed_safer_calls": ["reviewAgentChange"],
+    "before_behavior": "The MCP toolkit listed agents and prepared a review item.",
+    "after_behavior": "The MCP toolkit creates and deletes agents directly.",
+    "changed_boundary": "state_mutation",
+    "risk_evidence": ["deleteAgent"],
+    "why_normal_ci_misses_it": "Normal CI can pass without summarizing that the MCP surface now mutates agent records."
+  }
+}

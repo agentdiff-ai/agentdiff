@@ -1,0 +1,14 @@
+{
+  "title": "agent delegates to broader CLI runner",
+  "expected_status": "action_required",
+  "expected_finding": {
+    "path": "src/agent.js",
+    "added_high_risk_calls": ["grantRepoAccess"],
+    "removed_safer_calls": ["validateToolSurface"],
+    "before_behavior": "The agent validated a constrained tool surface before running.",
+    "after_behavior": "The agent grants repository access and delegates execution to a CLI runner.",
+    "changed_boundary": "tool_reachability",
+    "risk_evidence": ["grantRepoAccess"],
+    "why_normal_ci_misses_it": "Normal CI can pass while the execution boundary moves from explicit tools to a broader delegated runner."
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "title": "payment agent gains refund and dispute write tools",
+  "expected_status": "action_required",
+  "expected_finding": {
+    "path": "src/agent.js",
+    "added_high_risk_calls": ["issueRefund", "approveDispute"],
+    "removed_safer_calls": ["check_policy"],
+    "before_behavior": "The agent checked policy and prepared a manual review result.",
+    "after_behavior": "The agent issues refunds and approves disputes directly.",
+    "changed_boundary": "state_mutation",
+    "risk_evidence": ["issueRefund", "approveDispute", "check_policy"],
+    "why_normal_ci_misses_it": "The code can run while the agent changes from policy review to money-moving write behavior."
+  }
+}

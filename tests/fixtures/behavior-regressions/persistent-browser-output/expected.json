@@ -1,0 +1,14 @@
+{
+  "title": "browser execution result becomes persistent output",
+  "expected_status": "action_required",
+  "expected_finding": {
+    "path": "src/agent.js",
+    "added_high_risk_calls": ["updateBrowserFile"],
+    "removed_safer_calls": ["validateBrowserResult"],
+    "before_behavior": "The agent validated transient browser execution output.",
+    "after_behavior": "The agent saves browser output and writes it to a persistent file.",
+    "changed_boundary": "state_mutation",
+    "risk_evidence": ["updateBrowserFile"],
+    "why_normal_ci_misses_it": "Execution can still work while the agent gains persistent file-write behavior."
+  }
+}
