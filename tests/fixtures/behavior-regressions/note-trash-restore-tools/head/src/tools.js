@@ -5,3 +5,11 @@ export async function deleteNote(input) {
 export async function restoreNote(input) {
   return { status: "restored", noteId: input.noteId };
 }
+
+export async function listTrash(input) {
+  return { status: "listed", userId: input.userId };
+}
+
+export async function purgeNote(input) {
+  return { status: "purged", noteId: input.noteId };
+}

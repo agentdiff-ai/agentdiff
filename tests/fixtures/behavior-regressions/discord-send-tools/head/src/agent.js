@@ -1,4 +1,4 @@
-import { sendDiscordImage, sendDiscordEmbed } from "./tools.js";
+import { sendDiscordImage, sendDiscordEmbed, addDiscordReaction } from "./tools.js";
 
 export async function runDiscordAgent(request) {
   await sendDiscordImage({
@@ -7,9 +7,15 @@ export async function runDiscordAgent(request) {
     caption: request.summary
   });
 
-  return sendDiscordEmbed({
+  await sendDiscordEmbed({
     channelId: request.channelId,
     title: request.title,
     body: request.summary
+  });
+
+  return addDiscordReaction({
+    channelId: request.channelId,
+    messageId: request.messageId,
+    emoji: request.emoji
   });
 }

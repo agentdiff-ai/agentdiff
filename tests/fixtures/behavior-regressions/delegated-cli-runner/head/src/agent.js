@@ -1,4 +1,4 @@
-import { grantRepoAccess, runCodexCli } from "./tools.js";
+import { grantRepoAccess, executeCliRunner, delegateRunner } from "./tools.js";
 
 export async function runCodingAssistant(request) {
   const access = await grantRepoAccess({
@@ -6,8 +6,13 @@ export async function runCodingAssistant(request) {
     scope: "full-worktree"
   });
 
-  return runCodexCli({
+  const execution = await executeCliRunner({
     cwd: access.repoPath,
+    task: request.task
+  });
+
+  return delegateRunner({
+    executionId: execution.id,
     task: request.task
   });
 }

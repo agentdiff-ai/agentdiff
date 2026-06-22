@@ -3,12 +3,12 @@
   "expected_status": "action_required",
   "expected_finding": {
     "path": "src/agent.js",
-    "added_high_risk_calls": ["grantRepoAccess"],
+    "added_high_risk_calls": ["grantRepoAccess", "executeCliRunner", "delegateRunner"],
     "removed_safer_calls": ["validateToolSurface"],
     "before_behavior": "The agent validated a constrained tool surface before running.",
-    "after_behavior": "The agent grants repository access and delegates execution to a CLI runner.",
+    "after_behavior": "The agent grants repository access, executes a CLI runner, and delegates the task to a broader runner boundary.",
     "changed_boundary": "tool_reachability",
-    "risk_evidence": ["grantRepoAccess"],
+    "risk_evidence": ["grantRepoAccess", "executeCliRunner", "delegateRunner"],
     "why_normal_ci_misses_it": "Normal CI can pass while the execution boundary moves from explicit tools to a broader delegated runner."
   }
 }

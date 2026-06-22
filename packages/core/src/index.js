@@ -23,6 +23,57 @@ const HIGH_RISK_CALL_WORDS = [
   "grant"
 ];
 
+const CONTEXTUAL_HIGH_RISK_CALL_WORDS = [
+  "create",
+  "add",
+  "append",
+  "insert",
+  "upsert",
+  "update",
+  "delete",
+  "clear",
+  "remove",
+  "restore",
+  "purge",
+  "refund",
+  "charge",
+  "send",
+  "submit",
+  "schedule",
+  "publish",
+  "deploy",
+  "grant",
+  "approve",
+  "accept",
+  "execute",
+  "save",
+  "write",
+  "persist",
+  "delegate"
+];
+
+const BENIGN_CALLS = new Set([
+  "createlogger",
+  "createclient",
+  "createcontext",
+  "createconfig",
+  "createschema",
+  "createerror",
+  "createmock",
+  "createfixture",
+  "createtest",
+  "createelement",
+  "createsignal",
+  "createoctokit",
+  "createopenai",
+  "createanthropic",
+  "addeventlistener",
+  "addlistener",
+  "appendchild",
+  "insertbefore",
+  "removeeventlistener"
+]);
+
 const SAFER_CALL_WORDS = [
   "escalate",
   "review",
@@ -735,6 +786,10 @@ function isTestOrFixturePath(pathName) {
     pathName.startsWith("tests/") ||
     pathName.includes("/integration-tests/") ||
     pathName.startsWith("integration-tests/") ||
+    pathName.includes("/test-utils/") ||
+    pathName.includes("/test-utils.") ||
+    pathName.endsWith("/test-utils.ts") ||
+    pathName.endsWith("/test-utils.js") ||
     pathName.includes("/e2e/") ||
     pathName.startsWith("e2e/") ||
     pathName.includes("/fixtures/") ||
@@ -1196,7 +1251,8 @@ function buildDiffAwareFindings(file) {
   if (!file.diffText) return [];
 
   const calls = extractCallsFromUnifiedDiff(file.diffText);
-  const addedHighRiskCalls = calls.added_calls.filter((call) => isHighRiskCall(call));
+  const diffContext = diffAwareContextForFile(file);
+  const addedHighRiskCalls = calls.added_calls.filter((call) => isHighRiskCall(call, diffContext));
   const removedSaferCalls = calls.removed_calls.filter(isSaferCall);
 
   if (calls.added_calls.length === 0 && calls.removed_calls.length === 0) {
@@ -1286,8 +1342,79 @@ function extractSensitiveArgumentNames(content) {
 
 function isHighRiskCall(call, context = "") {
   const normalized = call.toLowerCase();
+  if (isBenignHighRiskCall(call, context)) return false;
+  if (CONTEXTUAL_HIGH_RISK_CALL_WORDS.some((word) => callHasRiskToken(call, word)) && hasAgentToolRuntimeContext(`${normalized}\n${context}`)) return true;
   if (normalized.includes("create")) return hasStrongMutationContext(`${normalized}\n${context}`);
   return HIGH_RISK_CALL_WORDS.filter((word) => word !== "create").some((word) => normalized.includes(word));
+}
+
+function callHasRiskToken(call, word) {
+  return splitCallName(call).some((token) => token === word);
+}
+
+function splitCallName(call = "") {
+  return String(call)
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function diffAwareContextForFile(file) {
+  return [file.filePath, file.content, file.diffText].filter(Boolean).join("\n").toLowerCase();
+}
+
+function hasAgentToolRuntimeContext(context = "") {
+  const lower = context.toLowerCase();
+  return [
+    "agent",
+    "assistant",
+    "tool",
+    "mcp",
+    "workflow",
+    "automation",
+    "route",
+    "api",
+    "action",
+    "ability",
+    "command",
+    "scheduler",
+    "memory",
+    "email",
+    "slack",
+    "discord",
+    "sheet",
+    "sheets",
+    "spreadsheet",
+    "payment",
+    "refund",
+    "ticket",
+    "browser",
+    "invoice",
+    "database",
+    "db",
+    "persistent",
+    "storage",
+    "runner",
+    "codex"
+  ].some((word) => lower.includes(word));
+}
+
+function isBenignHighRiskCall(call, context = "") {
+  const normalizedCall = String(call).toLowerCase();
+  if (BENIGN_CALLS.has(normalizedCall)) return true;
+  if (/^create[a-z0-9]*(client|config|context|logger|schema|error|mock|fixture|test|element|signal|settings|profile|middleware|handler|response|span|processor|registry|state)$/i.test(call)) {
+    return true;
+  }
+  if (normalizedCall.startsWith("createtest") || normalizedCall.startsWith("createmock")) {
+    return true;
+  }
+  if (normalizedCall !== "createstore") return false;
+  const lower = context.toLowerCase();
+  const frontendLocalState = /\b(frontend|component|components|ui|react|solid|svelte|zustand|local state)\b/.test(lower);
+  const persistentAgentState = /\b(agent|memory|persistent|storage|database|db|tool)\b/.test(lower);
+  return frontendLocalState && !persistentAgentState;
 }
 
 function hasStrongMutationContext(context) {

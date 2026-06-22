@@ -1,3 +1,3 @@
-export async function sendEmail(input) {
+export async function send_email(input) {
   return { status: "sent", messageId: `msg-${input.recipientEmail}` };
 }

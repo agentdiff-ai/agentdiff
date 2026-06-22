@@ -3,12 +3,12 @@
   "expected_status": "action_required",
   "expected_finding": {
     "path": "src/agent.js",
-    "added_high_risk_calls": ["sendDiscordImage", "sendDiscordEmbed"],
+    "added_high_risk_calls": ["sendDiscordImage", "sendDiscordEmbed", "addDiscordReaction"],
     "removed_safer_calls": ["draftDiscordMessage"],
     "before_behavior": "The agent drafted a Discord response for review.",
-    "after_behavior": "The agent sends Discord image and embed messages directly.",
+    "after_behavior": "The agent sends Discord image/embed messages and adds reactions directly.",
     "changed_boundary": "external_message",
-    "risk_evidence": ["sendDiscordImage", "sendDiscordEmbed"],
+    "risk_evidence": ["sendDiscordImage", "sendDiscordEmbed", "addDiscordReaction"],
     "why_normal_ci_misses_it": "Normal tests can pass without making the new external Discord send behavior visible in review."
   }
 }

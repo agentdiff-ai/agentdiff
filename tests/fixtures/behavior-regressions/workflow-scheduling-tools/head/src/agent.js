@@ -1,4 +1,4 @@
-import { createWorkflowTool, updateSchedule, deleteWorkflow } from "./tools.js";
+import { createWorkflowTool, updateSchedule, scheduleWorkflow, deleteWorkflow } from "./tools.js";
 
 export async function runWorkflowAgent(request) {
   const workflow = await createWorkflowTool({
@@ -9,6 +9,11 @@ export async function runWorkflowAgent(request) {
   await updateSchedule({
     workflowId: workflow.id,
     cron: request.cron
+  });
+
+  await scheduleWorkflow({
+    workflowId: workflow.id,
+    runAt: request.runAt
   });
 
   return deleteWorkflow({

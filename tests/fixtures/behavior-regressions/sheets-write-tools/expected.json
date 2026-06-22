@@ -3,12 +3,12 @@
   "expected_status": "action_required",
   "expected_finding": {
     "path": "src/agent.js",
-    "added_high_risk_calls": ["updateSheetValues"],
+    "added_high_risk_calls": ["createSheetTool", "addSheetTab", "appendSheetValues", "clearSheetValues", "updateSheetValues"],
     "removed_safer_calls": ["validateSheetWrite"],
     "before_behavior": "The agent validated a proposed spreadsheet write and returned a draft plan.",
-    "after_behavior": "The agent creates a sheet and updates spreadsheet values directly.",
+    "after_behavior": "The agent creates a sheet, adds a tab, appends rows, clears a range, and updates spreadsheet values directly.",
     "changed_boundary": "state_mutation",
-    "risk_evidence": ["updateSheetValues"],
+    "risk_evidence": ["createSheetTool", "addSheetTab", "appendSheetValues", "clearSheetValues", "updateSheetValues"],
     "why_normal_ci_misses_it": "Tests can still pass while the agent changes from review-only spreadsheet behavior to direct write behavior."
   }
 }

@@ -3,12 +3,12 @@
   "expected_status": "action_required",
   "expected_finding": {
     "path": "src/agent.js",
-    "added_high_risk_calls": ["sendEmail"],
+    "added_high_risk_calls": ["send_email"],
     "removed_safer_calls": ["draftEmail"],
     "before_behavior": "The agent drafted an email for review.",
     "after_behavior": "The agent sends email directly.",
     "changed_boundary": "external_message",
-    "risk_evidence": ["sendEmail"],
+    "risk_evidence": ["send_email"],
     "why_normal_ci_misses_it": "Normal CI does not summarize that the agent crossed from draft-only to customer-visible sending."
   }
 }

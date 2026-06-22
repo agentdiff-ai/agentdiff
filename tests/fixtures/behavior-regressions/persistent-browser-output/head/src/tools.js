@@ -6,6 +6,10 @@ export async function saveBrowserOutput(input) {
   return { path: `/outputs/${input.name}.html` };
 }
 
+export async function writePersistentOutput(input) {
+  return { status: "written", path: input.path };
+}
+
 export async function updateBrowserFile(input) {
   return { status: "written", path: input.path };
 }

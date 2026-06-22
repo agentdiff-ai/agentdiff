@@ -1,4 +1,4 @@
-import { deleteNote, restoreNote } from "./tools.js";
+import { deleteNote, restoreNote, listTrash, purgeNote } from "./tools.js";
 
 export async function runNoteAgent(request) {
   await deleteNote({
@@ -6,7 +6,15 @@ export async function runNoteAgent(request) {
     permanent: request.permanent
   });
 
-  return restoreNote({
+  await listTrash({
+    userId: request.userId
+  });
+
+  await restoreNote({
     noteId: request.restoreNoteId
+  });
+
+  return purgeNote({
+    noteId: request.purgeNoteId
   });
 }
