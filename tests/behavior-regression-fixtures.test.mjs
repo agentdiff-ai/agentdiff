@@ -47,6 +47,7 @@ for (const scenario of scenarios) {
   run("git", ["commit", "-m", "base"], tempRepo);
   const baseRef = output("git", ["rev-parse", "HEAD"], tempRepo).trim();
 
+  run("git", ["rm", "-r", "--quiet", "."], tempRepo);
   copyTree(path.join(scenarioDir, "head"), tempRepo);
   run("git", ["add", "."], tempRepo);
   run("git", ["commit", "-m", "head"], tempRepo);
