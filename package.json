@@ -35,6 +35,7 @@
     "study:pr-mining": "node scripts/pr-mining-study.js",
     "study:open-prs": "node scripts/open-pr-watchlist.js",
     "study:prospect-open-prs": "node scripts/open-pr-prospect.js",
+    "study:evidence-bank": "node scripts/evidence-bank-miner.js",
     "zoo": "node scripts/agent-zoo-test.js",
     "zoo:update": "node scripts/agent-zoo-test.js --update",
     "zoo:live": "node scripts/agent-zoo-live-openrouter.js",

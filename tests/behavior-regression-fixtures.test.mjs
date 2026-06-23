@@ -96,6 +96,12 @@ if (failures.length > 0) {
 console.log(`behavior regression fixtures passed (${scenarios.length} scenarios)`);
 
 function copyTree(from, to) {
+  if (fs.existsSync(to)) {
+    for (const entry of fs.readdirSync(to)) {
+      if (entry === ".git") continue;
+      fs.rmSync(path.join(to, entry), { recursive: true, force: true });
+    }
+  }
   fs.cpSync(from, to, { recursive: true, force: true });
 }
 
