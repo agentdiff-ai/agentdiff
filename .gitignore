@@ -5,6 +5,7 @@ node_modules/
 .agentdiff/stranger-tests/
 .agentdiff/agent-repo-lab/
 .agentdiff/real-repo-study/
+.agentdiff/detector-audits/
 .agentdiff/agent-zoo/
 .agentdiff/agent-zoo-live/
 .agentdiff/pr-mining/
