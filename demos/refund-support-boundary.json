@@ -1,0 +1,73 @@
+{
+  "id": "refund-support-boundary",
+  "title": "Agentdiff refund support demo",
+  "pr": {
+    "owner": "agentdiff-ai",
+    "repo": "agentdiff",
+    "number": 10,
+    "url": "https://github.com/agentdiff-ai/agentdiff/pull/10"
+  },
+  "outputFile": "agentdiff-refund-support-demo.mp4",
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "minDurationSeconds": 60,
+    "maxDurationSeconds": 90
+  },
+  "voice": {
+    "preferred": "Microsoft Zira Desktop"
+  },
+  "closingLine": "Normal CI tells you whether code still runs. Agentdiff tells you whether the agent's behavior boundary changed.",
+  "shots": [
+    {
+      "id": "01-checks-green",
+      "title": "GitHub PR checks green",
+      "durationSeconds": 10,
+      "url": "https://github.com/agentdiff-ai/agentdiff/pull/10/checks?check_run_id=83094275697",
+      "fallbackUrl": "https://github.com/agentdiff-ai/agentdiff/pull/10",
+      "strategy": "checks",
+      "screenshot": "01-checks-green.png",
+      "caption": "Normal CI tells you whether code still runs.",
+      "voiceover": "Normal CI tells you whether code still runs.",
+      "expectedText": ["classify", "Demo: support agent refund path"]
+    },
+    {
+      "id": "02-pr-diff",
+      "title": "PR diff",
+      "durationSeconds": 20,
+      "url": "https://github.com/agentdiff-ai/agentdiff/pull/10/files#diff-c3069518e8d3ae8733b4fc4edcc48e00a6aa1809fd71081aa3936d8ebef7aafc",
+      "fallbackUrl": "https://github.com/agentdiff-ai/agentdiff/pull/10/files",
+      "strategy": "diff",
+      "screenshot": "02-pr-diff.png",
+      "caption": "Escalation becomes direct customer-visible action.",
+      "voiceover": "Here, a tiny support-agent PR changes refund handling from escalation to direct customer-visible action.",
+      "expectedText": ["escalate_ticket", "issue_refund", "close_ticket"]
+    },
+    {
+      "id": "03-agentdiff-comment",
+      "title": "Agentdiff sticky PR comment",
+      "durationSeconds": 25,
+      "url": "https://github.com/agentdiff-ai/agentdiff/pull/10#issuecomment-4784856372",
+      "captureUrl": "https://github.com/agentdiff-ai/agentdiff/pull/10",
+      "fallbackUrl": "https://github.com/agentdiff-ai/agentdiff/pull/10",
+      "strategy": "comment",
+      "screenshot": "03-agentdiff-comment.png",
+      "caption": "Agentdiff shows the behavior boundary changed.",
+      "voiceover": "Agentdiff does not claim this is a bug. It gives review context: the agent's behavior boundary changed.",
+      "expectedText": ["Action required", "issue_refund", "close_ticket", "escalate_ticket"]
+    },
+    {
+      "id": "04-evidence-loop",
+      "title": "Evidence loop",
+      "durationSeconds": 20,
+      "url": "https://github.com/agentdiff-ai/agentdiff/blob/main/docs/evidence-loop.md",
+      "fallbackUrl": "https://github.com/agentdiff-ai/agentdiff/tree/main/docs",
+      "strategy": "doc",
+      "screenshot": "04-evidence-loop.png",
+      "caption": "Evidence loop: 10 verified cases became 22.",
+      "voiceover": "This came from a repeatable evidence loop: mine public agent PRs read-only, find detector gaps, fix them, rerun. Normal CI tells you whether code still runs. Agentdiff tells you whether the agent's behavior boundary changed.",
+      "expectedText": ["Evidence loop", "10 to 22", "verified regression-style cases"]
+    }
+  ]
+}

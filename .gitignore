@@ -11,6 +11,7 @@ node_modules/
 .agentdiff/pr-mining/
 .agentdiff/open-pr-watchlist/
 .agentdiff/open-pr-prospect/
+.agentdiff/demos/
 .DS_Store
 dist/
 examples/remotion-demo/dist/
