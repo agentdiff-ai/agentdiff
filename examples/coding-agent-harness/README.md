@@ -55,3 +55,7 @@ OPENROUTER_QUALITY=final OPENROUTER_API_KEY=... AGENTDIFF_HARNESS=openrouter-ope
 You can override either path with `OPENROUTER_MODEL` or `OPENROUTER_FINAL_MODEL`.
 
 The product abstraction is the normalized trace, not a specific agent runtime.
+
+## Demo PR Trigger
+
+This line exists so the recorded harness workflow can run in a live pull request.
