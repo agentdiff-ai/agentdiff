@@ -92,6 +92,7 @@ This is early product evidence, not a security audit, not a benchmark, and not a
 
 Read more:
 
+- [docs/evidence-loop.md](docs/evidence-loop.md)
 - [docs/why-agent-behavior-diffs.md](docs/why-agent-behavior-diffs.md)
 - [docs/agent-zoo.md](docs/agent-zoo.md)
 - [docs/agent-zoo-live.md](docs/agent-zoo-live.md)
