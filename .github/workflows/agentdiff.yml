@@ -23,9 +23,8 @@ jobs:
         run: >-
           node packages/cli/bin/agentdiff.js run
           --base examples/support-ticket-agent/traces/base.json
-          --head examples/support-ticket-agent/traces/head.json
+          --harness-module examples/demo-support-agent/harness.js
           --scenario examples/support-ticket-agent/scenario.json
-          --harness-id support-ticket-recorded
           --out .agentdiff/runs/evidence/refund-approval
 
       - uses: ./

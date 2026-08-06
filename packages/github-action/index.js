@@ -43,10 +43,18 @@ function buildArgs(commandName, outDir) {
     if (scenario) args.push("--scenario", scenario);
     const harnessId = input("harness-id");
     if (harnessId) args.push("--harness-id", harnessId);
+    const harnessModule = input("harness-module");
+    if (harnessModule) args.push("--harness-module", harnessModule);
     args.push("--out", outDir);
 
     if (!example && !truthyInput("live")) {
-      throw new Error("run mode needs example for action usage, e.g. example=coding-agent-harness.");
+      const base = input("base");
+      const head = input("head");
+      if (!base || (!head && !harnessModule)) {
+        throw new Error("run mode needs example, or base plus head/harness-module inputs.");
+      }
+      args.push("--base", base);
+      if (head && !harnessModule) args.push("--head", head);
     }
 
     return args;

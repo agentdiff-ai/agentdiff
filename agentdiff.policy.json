@@ -19,7 +19,7 @@
           "current_revision": true,
           "artifacts": true,
           "harnesses": [
-            "support-ticket-recorded"
+            "demo-support-agent-js"
           ]
         }
       },

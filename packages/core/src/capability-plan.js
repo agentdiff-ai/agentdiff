@@ -215,6 +215,7 @@ function evaluateCoverage(rule, capability, scenarioById, runReports, expectedRe
   const failingScenarios = requiredScenarios.filter((id) => validReportsForScenario(id).some((report) => report.scenario_result.status === "fail"));
   const invalidExecutionScenarios = requiredScenarios.filter((id) => eligibleReportsForScenario(id).some((report) => !isValidScenarioResult(report.scenario_result)));
   const staleExecutionScenarios = requiredScenarios.filter((id) => reportsForScenario(id).some((report) => eligibilityForReport(report).reasons.includes("revision_mismatch")));
+  const dirtyWorktreeScenarios = requiredScenarios.filter((id) => reportsForScenario(id).some((report) => eligibilityForReport(report).reasons.includes("worktree_not_clean")));
   const unapprovedHarnessScenarios = requiredScenarios.filter((id) => reportsForScenario(id).some((report) => eligibilityForReport(report).reasons.includes("unapproved_harness")));
   const unverifiedArtifactScenarios = requiredScenarios.filter((id) => reportsForScenario(id).some((report) => eligibilityForReport(report).reasons.includes("artifacts_unverified")));
   const missingExecutionScenarios = requiredScenarios.filter((id) => !executedScenarios.includes(id));
@@ -234,6 +235,7 @@ function evaluateCoverage(rule, capability, scenarioById, runReports, expectedRe
       eligible: eligibility.eligible,
       rejection_reasons: eligibility.reasons,
       git_revision: report.execution_provenance?.git_revision ?? null,
+      worktree_clean: report.execution_provenance?.worktree_dirty === false,
       harness_id: report.execution_provenance?.harness_id ?? null,
       artifacts_verified: report.execution_provenance?.verified === true,
       artifact_verification_errors: report.execution_provenance?.verification_errors ?? [],
@@ -259,6 +261,7 @@ function evaluateCoverage(rule, capability, scenarioById, runReports, expectedRe
     failing_scenarios: failingScenarios,
     invalid_execution_scenarios: invalidExecutionScenarios,
     stale_execution_scenarios: staleExecutionScenarios,
+    dirty_worktree_scenarios: dirtyWorktreeScenarios,
     unapproved_harness_scenarios: unapprovedHarnessScenarios,
     unverified_artifact_scenarios: unverifiedArtifactScenarios,
     missing_execution_scenarios: missingExecutionScenarios,
@@ -286,6 +289,7 @@ function emptyCoverage() {
     failing_scenarios: [],
     invalid_execution_scenarios: [],
     stale_execution_scenarios: [],
+    dirty_worktree_scenarios: [],
     unapproved_harness_scenarios: [],
     unverified_artifact_scenarios: [],
     missing_execution_scenarios: [],
@@ -346,6 +350,7 @@ function executionEligibility(report, requirement, expectedRevision) {
   const provenance = report.execution_provenance;
   if (requirement.current_revision) {
     if (!expectedRevision || provenance?.git_revision !== expectedRevision) reasons.push("revision_mismatch");
+    if (provenance?.worktree_dirty !== false) reasons.push("worktree_not_clean");
   }
   if (requirement.harnesses.length > 0 && !requirement.harnesses.includes(provenance?.harness_id)) {
     reasons.push("unapproved_harness");

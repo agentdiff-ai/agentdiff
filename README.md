@@ -91,7 +91,7 @@ node packages/cli/bin/agentdiff.js init --github-action
 node packages/cli/bin/agentdiff.js plan --base main --head HEAD
 ```
 
-The generated workflow uses the moving `@v0` Action channel. A blocked plan still writes the job summary and sticky PR comment before the check fails. Policies can bind run evidence to the current Git revision, approved harness IDs, and unchanged trace/scenario hashes. These are trusted-workspace integrity checks, not signed attestation of how a trace was produced. See [docs/capability-plan.md](docs/capability-plan.md).
+The generated workflow uses the moving `@v0` Action channel. A blocked plan still writes the job summary and sticky PR comment before the check fails. Repository-local JS harness modules can execute the checked-out agent and return a normalized trace. Policies can bind that evidence to the current Git revision, approved harness IDs, and unchanged trace, scenario, and harness hashes. These are trusted-workspace integrity checks, not signed attestation. See [docs/capability-plan.md](docs/capability-plan.md).
 
 ## Evidence
 
