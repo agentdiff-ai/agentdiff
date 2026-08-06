@@ -1007,7 +1007,7 @@ async function resolveChangedFileInputs(argv) {
     return [];
   }
 
-  const output = execFileSync("git", ["diff", "--name-only", base, head], {
+  const output = execFileSync("git", ["diff", "--no-renames", "--name-only", base, head], {
     cwd: process.cwd(),
     encoding: "utf8"
   });
@@ -1023,7 +1023,7 @@ async function resolveChangedFileInputs(argv) {
 }
 
 function readGitDiffForFile({ base, head, filePath }) {
-  return execFileSync("git", ["diff", "--unified=80", base, head, "--", filePath], {
+  return execFileSync("git", ["diff", "--no-renames", "--unified=80", base, head, "--", filePath], {
     cwd: process.cwd(),
     encoding: "utf8"
   });

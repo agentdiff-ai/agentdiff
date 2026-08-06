@@ -66,7 +66,7 @@ The command always writes `report.json` and `report.md`. A `block` decision exit
 
 The policy file, every loaded scenario, and repository-local scenario and harness artifacts used by run evidence are protected automatically. `controls.paths` adds repository-specific controls such as the Agentdiff workflow. If the planned diff changes one of these files, the report includes a `changed_review_control` entry and blocks. `controls.decision` must be `block`; a head policy cannot relax the rule that protects its own changes.
 
-This prevents a pull request from satisfying its own policy by weakening the policy, scenario, harness, or configured workflow used to judge that same pull request. Review and merge control changes separately. Branch protection must still require the Agentdiff check; a workflow cannot defend itself after it has been disabled outside the check.
+This prevents a pull request from satisfying its own policy by weakening the policy, scenario, harness, or configured workflow used to judge that same pull request. Renames are evaluated as a deletion plus an addition so moving a protected control does not hide its original path. Review and merge control changes separately. Branch protection must still require the Agentdiff check; a workflow cannot defend itself after it has been disabled outside the check.
 
 ## Decisions
 

@@ -448,6 +448,27 @@ try {
   assert.equal(changedControlReport.summary.changed_review_controls, 1);
   assert.equal(changedControlReport.control_changes[0].kind, "changed_review_control");
 
+  execFileSync("git", ["mv", "agentdiff.policy.json", "policy-renamed.json"], { cwd: tempRoot });
+  execFileSync("git", ["commit", "-m", "rename review policy"], { cwd: tempRoot, stdio: "ignore" });
+  const renamedPolicyHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: tempRoot, encoding: "utf8" }).trim();
+  const renamedPolicy = spawnSync(process.execPath, [
+    cli,
+    "plan",
+    "--base", controlHead,
+    "--head", renamedPolicyHead,
+    "--out", ".agentdiff/renamed-policy-plan"
+  ], { cwd: tempRoot, encoding: "utf8" });
+  assert.equal(renamedPolicy.status, 1, renamedPolicy.stderr);
+  const renamedPolicyReport = JSON.parse(fs.readFileSync(path.join(tempRoot, ".agentdiff", "renamed-policy-plan", "report.json"), "utf8"));
+  assert.equal(renamedPolicyReport.decision, "block");
+  assert.equal(renamedPolicyReport.classification_summary.changed_files, 2);
+  assert.ok(renamedPolicyReport.control_changes.some((change) =>
+    change.kind === "changed_review_control" && change.path === "agentdiff.policy.json"
+  ));
+  assert.ok(renamedPolicyReport.warnings.some((warning) => warning.includes("capability policy not found")));
+  execFileSync("git", ["mv", "policy-renamed.json", "agentdiff.policy.json"], { cwd: tempRoot });
+  execFileSync("git", ["commit", "-m", "restore review policy"], { cwd: tempRoot, stdio: "ignore" });
+
   fs.rmSync(path.join(tempRoot, ".agentdiff", "scenarios"), { recursive: true, force: true });
   const blocked = spawnSync(process.execPath, [cli, "plan", "--base", base, "--head", head, "--out", ".agentdiff/blocked"], {
     cwd: tempRoot,

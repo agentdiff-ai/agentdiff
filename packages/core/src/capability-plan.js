@@ -203,6 +203,7 @@ export function buildCapabilityPlan({
     control_changes: controlChanges,
     classification_summary: {
       status: classificationReport.status,
+      changed_files: classificationReport.changed_files?.length ?? classificationReport.changed_surfaces?.length ?? 0,
       changed_surfaces: classificationReport.changed_surfaces?.length ?? 0,
       diff_aware_findings: classificationReport.diff_aware_findings?.length ?? 0,
       map_drift_findings: classificationReport.map_drift?.length ?? 0,
