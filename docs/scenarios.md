@@ -63,6 +63,8 @@ The v0 contract supports:
 - `must_not_call` with `tool`
 - `requires_confirmation` with `before_tool`
 - `state_field_must_equal` with `path` and `value`
+- `state_field_must_change` with `path`
+- `state_field_must_not_change` with `path`
 - `must_change_file` with `path`
 - `must_not_change_file` with `path`
 - `tests_must_pass` with `command`

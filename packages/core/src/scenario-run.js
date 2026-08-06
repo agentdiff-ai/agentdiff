@@ -5,6 +5,8 @@ const expectationEvaluators = Object.freeze({
   must_not_call: evaluateMustNotCall,
   requires_confirmation: evaluateRequiresConfirmation,
   state_field_must_equal: evaluateStateField,
+  state_field_must_change: evaluateStateFieldMustChange,
+  state_field_must_not_change: evaluateStateFieldMustNotChange,
   must_change_file: evaluateMustChangeFile,
   must_not_change_file: evaluateMustNotChangeFile,
   tests_must_pass: evaluateTestsMustPass
@@ -70,6 +72,29 @@ function evaluateStateField(expectation, trace) {
     passed,
     `state field ${expectation.path} ${passed ? "matched" : "did not match"} expected value`,
     [`expected: ${stableStringify(expectation.value)}`, `actual: ${stableStringify(actual)}`]
+  );
+}
+
+function evaluateStateFieldMustChange(expectation, trace) {
+  return evaluateStateFieldChange(expectation, trace, true);
+}
+
+function evaluateStateFieldMustNotChange(expectation, trace) {
+  return evaluateStateFieldChange(expectation, trace, false);
+}
+
+function evaluateStateFieldChange(expectation, trace, shouldChange) {
+  const before = readPath(trace.state_before ?? {}, expectation.path);
+  const after = readPath(trace.state_after ?? {}, expectation.path);
+  const changed = !isDeepStrictEqual(before, after);
+  const passed = changed === shouldChange;
+  const detail = shouldChange
+    ? `${changed ? "changed" : "did not change"}`
+    : `${changed ? "changed unexpectedly" : "remained unchanged"}`;
+  return result(
+    passed,
+    `state field ${expectation.path} ${detail}`,
+    [`before: ${stableStringify(before)}`, `after: ${stableStringify(after)}`]
   );
 }
 

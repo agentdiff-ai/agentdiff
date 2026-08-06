@@ -8,6 +8,8 @@ const expectationRegistry = Object.freeze({
   must_not_call: [requiredString("tool")],
   requires_confirmation: [requiredString("before_tool")],
   state_field_must_equal: [requiredString("path"), requiredProperty("value")],
+  state_field_must_change: [requiredString("path")],
+  state_field_must_not_change: [requiredString("path")],
   must_change_file: [requiredString("path")],
   must_not_change_file: [requiredString("path")],
   tests_must_pass: [requiredString("command")]
