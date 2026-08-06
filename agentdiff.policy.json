@@ -1,0 +1,24 @@
+{
+  "version": "0.1",
+  "defaults": {
+    "unmatched": "review"
+  },
+  "rules": [
+    {
+      "id": "demo-refunds-require-approval",
+      "capability": "issue_refund",
+      "path": "examples/demo-support-agent/**",
+      "reason": "Direct refund execution is not approved until the change includes a human-confirmation scenario.",
+      "require": {
+        "scenarios": [
+          "demo_refund_requires_human_approval"
+        ],
+        "confirmation": true
+      },
+      "decision": {
+        "covered": "review",
+        "uncovered": "block"
+      }
+    }
+  ]
+}
