@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { normalizeCodingAgentTrace } from "../normalizeTrace.js";
+import { loadScenarioFile } from "../../../packages/core/src/scenario.js";
 
 const thisFile = fileURLToPath(import.meta.url);
 export const harnessDir = path.dirname(thisFile);
@@ -15,7 +16,7 @@ const IGNORED_DIRS = new Set([".git", "node_modules", "dist", "coverage"]);
 
 export function loadScenario(fileName = "fix-auth-bug.json") {
   const scenarioPath = path.join(exampleDir, "scenarios", fileName);
-  return JSON.parse(fs.readFileSync(scenarioPath, "utf8"));
+  return loadScenarioFile(scenarioPath);
 }
 
 export function prepareTempFixture(scenario) {

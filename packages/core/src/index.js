@@ -1,4 +1,11 @@
 import fs from "node:fs";
+export {
+  SCENARIO_SCHEMA_VERSION,
+  SUPPORTED_EXPECTATION_TYPES,
+  ScenarioValidationError,
+  loadScenarioFile,
+  normalizeScenario
+} from "./scenario.js";
 
 const HIGH_RISK_TAGS = new Set([
   "destructive",

@@ -54,6 +54,9 @@ try {
   assert.match(config, /live_openrouter:/);
   assert.ok(fs.existsSync(path.join(tempRoot, ".agentdiff", "map.json")));
   assert.ok(fs.existsSync(path.join(tempRoot, ".agentdiff", "scenarios", "starter.json")));
+  const starterScenario = JSON.parse(fs.readFileSync(path.join(tempRoot, ".agentdiff", "scenarios", "starter.json"), "utf8"));
+  assert.equal(starterScenario.schema_version, "0.1");
+  assert.equal(starterScenario.expectations[0].type, "must_not_call");
 
   const second = runInit(tempRoot);
   assert.notEqual(second.status, 0);

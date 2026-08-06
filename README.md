@@ -149,6 +149,14 @@ The GitHub Action writes:
 
 Findings explain why they were flagged: reachability/import evidence, risk evidence, confidence reasoning, and suggested suppressions. Intentional findings can be suppressed in `agentdiff.yml` while staying visible for auditability. See [docs/suppressions.md](docs/suppressions.md).
 
+Validate a behavior scenario before wiring it to a harness:
+
+```bash
+node packages/cli/bin/agentdiff.js scenario validate .agentdiff/scenarios/starter.json
+```
+
+See [docs/scenarios.md](docs/scenarios.md) for the shared v0 scenario contract.
+
 ## Agent Zoo
 
 The deterministic zoo is the product regression suite:
@@ -228,6 +236,7 @@ Experimental live adapters exist for Codex CLI, Claude Agent SDK, and OpenRouter
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
 - [docs/suppressions.md](docs/suppressions.md)
+- [docs/scenarios.md](docs/scenarios.md)
 - [docs/release.md](docs/release.md)
 - [docs/bakeoff.md](docs/bakeoff.md)
 - [docs/bakeoff-findings.md](docs/bakeoff-findings.md)
@@ -238,8 +247,8 @@ Experimental live adapters exist for Codex CLI, Claude Agent SDK, and OpenRouter
 
 ## Near-Term Roadmap
 
-1. Scenario schema cleanup.
-2. Harness contract hardening.
-3. Base/head behavior runner.
-4. State fixture diff.
+1. Harness contract hardening.
+2. Base/head behavior runner.
+3. State fixture diff.
+4. Deterministic scenario suggestions for reachable high-risk surfaces.
 5. More precise resolver support for complex TS/package layouts.
