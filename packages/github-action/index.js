@@ -41,6 +41,8 @@ function buildArgs(commandName, outDir) {
     if (truthyInput("live")) args.push("--live");
     const scenario = input("scenario");
     if (scenario) args.push("--scenario", scenario);
+    const harnessId = input("harness-id");
+    if (harnessId) args.push("--harness-id", harnessId);
     args.push("--out", outDir);
 
     if (!example && !truthyInput("live")) {

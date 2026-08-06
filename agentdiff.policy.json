@@ -14,7 +14,14 @@
           "refund_requires_human_approval"
         ],
         "confirmation": true,
-        "execution": true
+        "execution": {
+          "required": true,
+          "current_revision": true,
+          "artifacts": true,
+          "harnesses": [
+            "support-ticket-recorded"
+          ]
+        }
       },
       "decision": {
         "covered": "review",

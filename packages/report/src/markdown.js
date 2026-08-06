@@ -18,6 +18,11 @@ export function renderMarkdownReport(report) {
     lines.push(`scenario result: ${report.scenario_result.status}`);
     lines.push(`scenario expectations: ${report.scenario_result.expectations_passed}/${report.scenario_result.expectations_total} passed`);
   }
+  if (report.execution_provenance) {
+    lines.push(`git revision: ${report.execution_provenance.git_revision ? shortRevision(report.execution_provenance.git_revision) : "unavailable"}`);
+    lines.push(`harness: ${report.execution_provenance.harness_id ?? "unidentified"}`);
+    lines.push(`artifact hashes recorded: ${Object.keys(report.execution_provenance.artifacts ?? {}).join(", ") || "none"}`);
+  }
   lines.push(`estimated cost: $${report.cost.estimated_cost_usd.toFixed(4)}`);
   lines.push(`actual cost: $${report.cost.actual_cost_usd.toFixed(4)}`);
   lines.push("");
@@ -102,7 +107,11 @@ function renderCapabilityPlan(report) {
   lines.push(`removed guardrails: ${report.summary.removed_guardrails}`);
   lines.push(`declared scenario coverage: ${report.summary.declared_covered}`);
   lines.push(`passing run coverage: ${report.summary.execution_covered}`);
+  lines.push(`provenance coverage: ${report.summary.provenance_covered}`);
   lines.push(`fully policy-covered capabilities: ${report.summary.covered}`);
+  if (report.execution_context?.expected_revision) {
+    lines.push(`expected head revision: ${shortRevision(report.execution_context.expected_revision)}`);
+  }
   lines.push(`uncovered capabilities: ${report.summary.uncovered}`);
   lines.push(`block: ${report.summary.block}`);
   lines.push(`review: ${report.summary.review}`);
@@ -171,13 +180,23 @@ function renderCapabilityChange(lines, change) {
   }
   lines.push(`- passing run required: ${change.coverage.execution_required ? "yes" : "no"}`);
   if (change.coverage.execution_required) {
+    lines.push(`- current revision required: ${change.coverage.execution_requirements.current_revision ? "yes" : "no"}`);
+    lines.push(`- artifact hashes required: ${change.coverage.execution_requirements.artifacts ? "yes" : "no"}`);
+    lines.push(`- approved harnesses: ${change.coverage.execution_requirements.harnesses.join(", ") || "any"}`);
     lines.push(`- executed: ${change.coverage.executed_scenarios.join(", ") || "none"}`);
     lines.push(`- passing: ${change.coverage.passing_scenarios.join(", ") || "none"}`);
     lines.push(`- failing: ${change.coverage.failing_scenarios.join(", ") || "none"}`);
     lines.push(`- invalid run evidence: ${change.coverage.invalid_execution_scenarios.join(", ") || "none"}`);
+    lines.push(`- stale revision evidence: ${change.coverage.stale_execution_scenarios.join(", ") || "none"}`);
+    lines.push(`- unapproved harness evidence: ${change.coverage.unapproved_harness_scenarios.join(", ") || "none"}`);
+    lines.push(`- unverified artifact evidence: ${change.coverage.unverified_artifact_scenarios.join(", ") || "none"}`);
     lines.push(`- missing run evidence: ${change.coverage.missing_execution_scenarios.join(", ") || "none"}`);
     for (const evidence of change.coverage.execution_evidence ?? []) {
-      lines.push(`- run evidence: ${evidence.scenario_id}=${evidence.status}${evidence.source_path ? ` (${evidence.source_path})` : ""}`);
+      lines.push(`- run evidence: ${evidence.scenario_id}=${evidence.status}, eligible=${evidence.eligible ? "yes" : "no"}${evidence.source_path ? ` (${evidence.source_path})` : ""}`);
+      lines.push(`  - revision: ${evidence.git_revision ? shortRevision(evidence.git_revision) : "missing"}`);
+      lines.push(`  - harness: ${evidence.harness_id ?? "missing"}`);
+      lines.push(`  - artifact hashes verified: ${evidence.artifacts_verified ? "yes" : "no"}`);
+      for (const reason of evidence.rejection_reasons ?? []) lines.push(`  - rejected: ${reason}`);
       for (const failure of evidence.failed_expectations ?? []) {
         lines.push(`  - FAIL ${failure.type}: ${failure.reason}`);
       }
@@ -187,6 +206,10 @@ function renderCapabilityChange(lines, change) {
   lines.push("evidence:");
   for (const item of change.evidence.slice(0, 8)) lines.push(`- ${item}`);
   lines.push("");
+}
+
+function shortRevision(value) {
+  return String(value).slice(0, 12);
 }
 
 function renderControlChange(lines, change) {

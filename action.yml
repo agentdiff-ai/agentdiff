@@ -28,6 +28,9 @@ inputs:
   scenario:
     description: "Scenario JSON file to evaluate against the head trace in run mode."
     required: false
+  harness-id:
+    description: "Stable harness identity recorded in run provenance."
+    required: false
   example:
     description: "Example name for run mode, such as coding-agent-harness."
     required: false

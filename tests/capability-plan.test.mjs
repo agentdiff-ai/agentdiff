@@ -17,6 +17,18 @@ const action = path.join(repoRoot, "packages", "github-action", "index.js");
 const fixtureRoot = path.join(repoRoot, "tests", "fixtures", "capability-plan");
 const policy = JSON.parse(fs.readFileSync(path.join(fixtureRoot, "refund-policy.json"), "utf8"));
 const scenario = loadScenarioFile(path.join(fixtureRoot, "scenarios", "refund.json"));
+const expectedRevision = "0123456789abcdef0123456789abcdef01234567";
+
+function executionProvenance(overrides = {}) {
+  return {
+    schema_version: "0.1",
+    git_revision: expectedRevision,
+    harness_id: "test-harness",
+    verified: true,
+    verification_errors: [],
+    ...overrides
+  };
+}
 
 const classificationReport = {
   repo: "refund-agent",
@@ -37,6 +49,7 @@ const classificationReport = {
 
 const passingRunReport = {
   mode: "base_head_light",
+  execution_provenance: executionProvenance(),
   scenario_result: {
     scenario_id: "refund_requires_human_approval",
     status: "pass",
@@ -49,6 +62,7 @@ const passingRunReport = {
 const failingRunReport = {
   mode: "base_head_light",
   source_path: ".agentdiff/evidence/refund/report.json",
+  execution_provenance: executionProvenance(),
   scenario_result: {
     scenario_id: "refund_requires_human_approval",
     status: "fail",
@@ -71,6 +85,7 @@ const covered = buildCapabilityPlan({
   policy,
   scenarios: [scenario],
   runReports: [passingRunReport],
+  expectedRevision,
   policySource: "refund-policy.json"
 });
 
@@ -94,6 +109,7 @@ const failingExecution = buildCapabilityPlan({
   policy,
   scenarios: [scenario],
   runReports: [failingRunReport],
+  expectedRevision,
   policySource: "refund-policy.json"
 });
 assert.equal(failingExecution.decision, "block");
@@ -108,7 +124,8 @@ const conflictingExecution = buildCapabilityPlan({
   classificationReport,
   policy,
   scenarios: [scenario],
-  runReports: [passingRunReport, failingRunReport]
+  runReports: [passingRunReport, failingRunReport],
+  expectedRevision
 });
 assert.equal(conflictingExecution.decision, "block");
 assert.deepEqual(conflictingExecution.capability_changes[0].coverage.failing_scenarios, ["refund_requires_human_approval"]);
@@ -117,10 +134,44 @@ const malformedExecution = buildCapabilityPlan({
   classificationReport,
   policy,
   scenarios: [scenario],
-  runReports: [{ scenario_result: { scenario_id: "refund_requires_human_approval", status: "pass" } }]
+  runReports: [{
+    execution_provenance: executionProvenance(),
+    scenario_result: { scenario_id: "refund_requires_human_approval", status: "pass" }
+  }],
+  expectedRevision
 });
 assert.equal(malformedExecution.decision, "block");
 assert.deepEqual(malformedExecution.capability_changes[0].coverage.invalid_execution_scenarios, ["refund_requires_human_approval"]);
+
+const staleExecution = buildCapabilityPlan({
+  classificationReport,
+  policy,
+  scenarios: [scenario],
+  runReports: [{ ...passingRunReport, execution_provenance: executionProvenance({ git_revision: "stale" }) }],
+  expectedRevision
+});
+assert.equal(staleExecution.decision, "block");
+assert.deepEqual(staleExecution.capability_changes[0].coverage.stale_execution_scenarios, ["refund_requires_human_approval"]);
+
+const unapprovedHarness = buildCapabilityPlan({
+  classificationReport,
+  policy,
+  scenarios: [scenario],
+  runReports: [{ ...passingRunReport, execution_provenance: executionProvenance({ harness_id: "unknown-harness" }) }],
+  expectedRevision
+});
+assert.equal(unapprovedHarness.decision, "block");
+assert.deepEqual(unapprovedHarness.capability_changes[0].coverage.unapproved_harness_scenarios, ["refund_requires_human_approval"]);
+
+const unverifiedArtifacts = buildCapabilityPlan({
+  classificationReport,
+  policy,
+  scenarios: [scenario],
+  runReports: [{ ...passingRunReport, execution_provenance: executionProvenance({ verified: false }) }],
+  expectedRevision
+});
+assert.equal(unverifiedArtifacts.decision, "block");
+assert.deepEqual(unverifiedArtifacts.capability_changes[0].coverage.unverified_artifact_scenarios, ["refund_requires_human_approval"]);
 
 const noChanges = buildCapabilityPlan({
   classificationReport: { ...classificationReport, diff_aware_findings: [] },
@@ -180,14 +231,36 @@ try {
   fs.copyFileSync(path.join(fixtureRoot, "refund-policy.json"), path.join(tempRoot, "agentdiff.policy.json"));
   fs.mkdirSync(path.join(tempRoot, ".agentdiff", "scenarios"), { recursive: true });
   fs.copyFileSync(path.join(fixtureRoot, "scenarios", "refund.json"), path.join(tempRoot, ".agentdiff", "scenarios", "refund.json"));
-  fs.mkdirSync(path.join(tempRoot, ".agentdiff", "evidence"), { recursive: true });
-  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "evidence", "report.json"), JSON.stringify(passingRunReport, null, 2));
+  fs.mkdirSync(path.join(tempRoot, ".agentdiff", "traces"), { recursive: true });
+  const safeTrace = JSON.stringify({ scenario_id: "refund_requires_human_approval", tool_calls: [], state_after: {} }, null, 2);
+  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "traces", "base.json"), safeTrace);
+  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "traces", "head.json"), safeTrace);
+  const evidenceRun = spawnSync(process.execPath, [
+    cli,
+    "run",
+    "--base", ".agentdiff/traces/base.json",
+    "--head", ".agentdiff/traces/head.json",
+    "--scenario", ".agentdiff/scenarios/refund.json",
+    "--harness-id", "test-harness",
+    "--out", ".agentdiff/evidence"
+  ], { cwd: tempRoot, encoding: "utf8" });
+  assert.equal(evidenceRun.status, 0, evidenceRun.stderr);
 
   const reviewed = spawnSync(process.execPath, [cli, "plan", "--base", base, "--head", head, "--run-reports", ".agentdiff/evidence"], { cwd: tempRoot, encoding: "utf8" });
   assert.equal(reviewed.status, 0, reviewed.stderr);
   assert.match(reviewed.stdout, /agentdiff plan: review/);
   const reportPath = path.join(tempRoot, ".agentdiff", "runs", "latest", "report.json");
   assert.equal(JSON.parse(fs.readFileSync(reportPath, "utf8")).decision, "review");
+
+  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "traces", "head.json"), `${safeTrace}\n`);
+  const tampered = spawnSync(process.execPath, [cli, "plan", "--base", base, "--head", head, "--run-reports", ".agentdiff/evidence", "--out", ".agentdiff/tampered-plan"], {
+    cwd: tempRoot,
+    encoding: "utf8"
+  });
+  assert.equal(tampered.status, 1, tampered.stderr);
+  const tamperedReport = JSON.parse(fs.readFileSync(path.join(tempRoot, ".agentdiff", "tampered-plan", "report.json"), "utf8"));
+  assert.deepEqual(tamperedReport.capability_changes[0].coverage.unverified_artifact_scenarios, ["refund_requires_human_approval"]);
+  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "traces", "head.json"), safeTrace);
 
   const actionRun = spawnSync(process.execPath, [action], {
     cwd: tempRoot,
