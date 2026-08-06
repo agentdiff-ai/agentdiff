@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
 import { evaluateScenarioTrace, normalizeScenario } from "../packages/core/src/index.js";
 import { renderMarkdownReport } from "../packages/report/src/markdown.js";
 
@@ -58,6 +59,7 @@ assert.throws(
 
 const repoRoot = process.cwd();
 const cli = path.join(repoRoot, "packages", "cli", "bin", "agentdiff.js");
+const repoRevision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
 const outRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentdiff-scenario-run-test-"));
 try {
   const common = [
@@ -76,7 +78,19 @@ try {
   const passReport = JSON.parse(fs.readFileSync(path.join(outRoot, "pass", "report.json"), "utf8"));
   assert.equal(passReport.scenario_result.status, "pass");
   assert.equal(passReport.status, "pass");
+  assert.equal(passReport.execution_provenance.git_revision, repoRevision);
+  assert.equal(passReport.execution_provenance.harness_id, "recorded-trace");
+  assert.equal(passReport.execution_provenance.artifacts.base_trace.path, "examples/support-ticket-agent/traces/base.json");
+  assert.equal(passReport.execution_provenance.artifacts.base_trace.repository_local, true);
+  assert.equal(
+    passReport.execution_provenance.artifacts.base_trace.sha256,
+    createHash("sha256").update(fs.readFileSync(path.join(repoRoot, "examples", "support-ticket-agent", "traces", "base.json"))).digest("hex")
+  );
+  assert.match(passReport.execution_provenance.artifacts.head_trace.sha256, /^[a-f0-9]{64}$/);
+  assert.match(passReport.execution_provenance.artifacts.scenario.sha256, /^[a-f0-9]{64}$/);
   assert.match(renderMarkdownReport(passReport), /## scenario result: pass/);
+  assert.match(renderMarkdownReport(passReport), /harness: recorded-trace/);
+  assert.match(renderMarkdownReport(passReport), /artifact hashes recorded: base_trace, head_trace, scenario/);
   assert.match(renderMarkdownReport(passReport), /No behavior regressions detected/);
 
   const failRun = spawnSync(process.execPath, [...common, "--head", path.join(repoRoot, "examples", "support-ticket-agent", "traces", "head.json"), "--out", path.join(outRoot, "fail")], {

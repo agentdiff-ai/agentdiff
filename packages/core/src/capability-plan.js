@@ -50,10 +50,8 @@ export function normalizeCapabilityPolicy(value, { source = "capability policy" 
     if (rule.require?.confirmation !== undefined && typeof rule.require.confirmation !== "boolean") {
       errors.push(`${prefix}.require.confirmation must be a boolean`);
     }
-    if (rule.require?.execution !== undefined && typeof rule.require.execution !== "boolean") {
-      errors.push(`${prefix}.require.execution must be a boolean`);
-    }
-    if (rule.require?.execution === true && (!Array.isArray(requiredScenarios) || requiredScenarios.length === 0)) {
+    const execution = normalizeExecutionRequirement(rule.require?.execution, `${prefix}.require.execution`, errors);
+    if (execution.required && (!Array.isArray(requiredScenarios) || requiredScenarios.length === 0)) {
       errors.push(`${prefix}.require.execution needs at least one required scenario`);
     }
 
@@ -70,7 +68,7 @@ export function normalizeCapabilityPolicy(value, { source = "capability policy" 
       require: {
         scenarios: Array.isArray(requiredScenarios) ? [...new Set(requiredScenarios.map((item) => item.trim()))] : [],
         confirmation: rule.require?.confirmation === true,
-        execution: rule.require?.execution === true
+        execution
       },
       decision: { covered, uncovered }
     };
@@ -85,7 +83,15 @@ export function normalizeCapabilityPolicy(value, { source = "capability policy" 
   };
 }
 
-export function buildCapabilityPlan({ classificationReport, policy, scenarios = [], runReports = [], policySource = "agentdiff.policy.json", warnings = [] }) {
+export function buildCapabilityPlan({
+  classificationReport,
+  policy,
+  scenarios = [],
+  runReports = [],
+  expectedRevision = null,
+  policySource = "agentdiff.policy.json",
+  warnings = []
+}) {
   const normalizedPolicy = normalizeCapabilityPolicy(policy, { source: policySource });
   const scenarioById = new Map();
   for (const scenario of scenarios) {
@@ -98,7 +104,7 @@ export function buildCapabilityPlan({ classificationReport, policy, scenarios = 
   for (const finding of classificationReport.diff_aware_findings ?? []) {
     for (const capability of finding.added_high_risk_calls ?? []) {
       const rule = normalizedPolicy.rules.find((candidate) => matchesRule(candidate, capability, finding.path));
-      const coverage = rule ? evaluateCoverage(rule, capability, scenarioById, runReports) : emptyCoverage();
+      const coverage = rule ? evaluateCoverage(rule, capability, scenarioById, runReports, expectedRevision) : emptyCoverage();
       const decision = rule
         ? coverage.covered ? rule.decision.covered : rule.decision.uncovered
         : normalizedPolicy.defaults.unmatched;
@@ -140,6 +146,7 @@ export function buildCapabilityPlan({ classificationReport, policy, scenarios = 
   const covered = capabilityChanges.filter((change) => change.coverage.covered).length;
   const declaredCovered = capabilityChanges.filter((change) => change.coverage.declared_covered).length;
   const executionCovered = capabilityChanges.filter((change) => change.coverage.execution_required && change.coverage.execution_covered).length;
+  const provenanceCovered = capabilityChanges.filter((change) => change.coverage.provenance_required && change.coverage.provenance_covered).length;
   const uncovered = capabilityChanges.filter((change) => change.rule_id && !change.coverage.covered).length;
 
   return {
@@ -153,6 +160,9 @@ export function buildCapabilityPlan({ classificationReport, policy, scenarios = 
       version: normalizedPolicy.version,
       rules: normalizedPolicy.rules.length
     },
+    execution_context: {
+      expected_revision: expectedRevision
+    },
     warnings: unique(warnings),
     summary: {
       added_capabilities: capabilityChanges.length,
@@ -160,6 +170,7 @@ export function buildCapabilityPlan({ classificationReport, policy, scenarios = 
       covered,
       declared_covered: declaredCovered,
       execution_covered: executionCovered,
+      provenance_covered: provenanceCovered,
       uncovered,
       matched_rules: capabilityChanges.filter((change) => change.rule_id).length,
       unmatched_capabilities: capabilityChanges.filter((change) => !change.rule_id).length,
@@ -181,7 +192,7 @@ export function buildCapabilityPlan({ classificationReport, policy, scenarios = 
   };
 }
 
-function evaluateCoverage(rule, capability, scenarioById, runReports) {
+function evaluateCoverage(rule, capability, scenarioById, runReports, expectedRevision) {
   const requiredScenarios = rule.require.scenarios;
   const presentScenarios = requiredScenarios.filter((id) => scenarioById.has(id));
   const missingScenarios = requiredScenarios.filter((id) => !scenarioById.has(id));
@@ -190,32 +201,49 @@ function evaluateCoverage(rule, capability, scenarioById, runReports) {
       expectation.type === "requires_confirmation" && matchesGlob(expectation.before_tool, capability)
     )
   );
+  const executionRequirement = rule.require.execution;
   const reportsForScenario = (id) => runReports.filter((report) => report.scenario_result?.scenario_id === id);
-  const validReportsForScenario = (id) => reportsForScenario(id).filter((report) => isValidScenarioResult(report.scenario_result));
+  const eligibilityForReport = (report) => executionEligibility(report, executionRequirement, expectedRevision);
+  const eligibleReportsForScenario = (id) => reportsForScenario(id).filter((report) => eligibilityForReport(report).eligible);
+  const validReportsForScenario = (id) => eligibleReportsForScenario(id).filter((report) => isValidScenarioResult(report.scenario_result));
   const executedScenarios = requiredScenarios.filter((id) => validReportsForScenario(id).length > 0);
   const passingScenarios = requiredScenarios.filter((id) => {
-    const matching = reportsForScenario(id);
+    const matching = eligibleReportsForScenario(id);
     const valid = validReportsForScenario(id);
     return matching.length > 0 && valid.length === matching.length && valid.every((report) => report.scenario_result.status === "pass");
   });
   const failingScenarios = requiredScenarios.filter((id) => validReportsForScenario(id).some((report) => report.scenario_result.status === "fail"));
-  const invalidExecutionScenarios = requiredScenarios.filter((id) => reportsForScenario(id).some((report) => !isValidScenarioResult(report.scenario_result)));
+  const invalidExecutionScenarios = requiredScenarios.filter((id) => eligibleReportsForScenario(id).some((report) => !isValidScenarioResult(report.scenario_result)));
+  const staleExecutionScenarios = requiredScenarios.filter((id) => reportsForScenario(id).some((report) => eligibilityForReport(report).reasons.includes("revision_mismatch")));
+  const unapprovedHarnessScenarios = requiredScenarios.filter((id) => reportsForScenario(id).some((report) => eligibilityForReport(report).reasons.includes("unapproved_harness")));
+  const unverifiedArtifactScenarios = requiredScenarios.filter((id) => reportsForScenario(id).some((report) => eligibilityForReport(report).reasons.includes("artifacts_unverified")));
   const missingExecutionScenarios = requiredScenarios.filter((id) => !executedScenarios.includes(id));
-  const executionCovered = !rule.require.execution || requiredScenarios.every((id) => passingScenarios.includes(id));
+  const executionCovered = !executionRequirement.required || requiredScenarios.every((id) => passingScenarios.includes(id));
+  const provenanceRequired = executionRequirement.current_revision || executionRequirement.artifacts || executionRequirement.harnesses.length > 0;
+  const provenanceCovered = !provenanceRequired || requiredScenarios.every((id) => eligibleReportsForScenario(id).length > 0);
   const declaredCovered = missingScenarios.length === 0 && confirmationCovered;
   const executionEvidence = runReports
     .filter((report) => requiredScenarios.includes(report.scenario_result?.scenario_id))
-    .map((report) => ({
+    .map((report) => {
+      const eligibility = eligibilityForReport(report);
+      return {
       scenario_id: report.scenario_result.scenario_id,
       status: report.scenario_result.status,
       source_path: report.source_path ?? null,
       run_id: report.run_id ?? null,
+      eligible: eligibility.eligible,
+      rejection_reasons: eligibility.reasons,
+      git_revision: report.execution_provenance?.git_revision ?? null,
+      harness_id: report.execution_provenance?.harness_id ?? null,
+      artifacts_verified: report.execution_provenance?.verified === true,
+      artifact_verification_errors: report.execution_provenance?.verification_errors ?? [],
       expectations_failed: report.scenario_result.expectations_failed ?? 0,
       failed_expectations: (report.scenario_result.expectation_results ?? [])
         .filter((result) => result.status === "fail")
         .slice(0, 5)
         .map((result) => ({ type: result.type, reason: result.reason, evidence: result.evidence ?? [] }))
-    }));
+      };
+    });
 
   return {
     required_scenarios: requiredScenarios,
@@ -224,15 +252,22 @@ function evaluateCoverage(rule, capability, scenarioById, runReports) {
     confirmation_required: rule.require.confirmation,
     confirmation_covered: confirmationCovered,
     declared_covered: declaredCovered,
-    execution_required: rule.require.execution,
+    execution_required: executionRequirement.required,
+    execution_requirements: executionRequirement,
     executed_scenarios: executedScenarios,
     passing_scenarios: passingScenarios,
     failing_scenarios: failingScenarios,
     invalid_execution_scenarios: invalidExecutionScenarios,
+    stale_execution_scenarios: staleExecutionScenarios,
+    unapproved_harness_scenarios: unapprovedHarnessScenarios,
+    unverified_artifact_scenarios: unverifiedArtifactScenarios,
     missing_execution_scenarios: missingExecutionScenarios,
     execution_evidence: executionEvidence,
     execution_covered: executionCovered,
-    covered: declaredCovered && executionCovered
+    provenance_required: provenanceRequired,
+    provenance_covered: provenanceCovered,
+    expected_revision: expectedRevision,
+    covered: declaredCovered && executionCovered && provenanceCovered
   };
 }
 
@@ -245,13 +280,20 @@ function emptyCoverage() {
     confirmation_covered: false,
     declared_covered: false,
     execution_required: false,
+    execution_requirements: { required: false, current_revision: false, artifacts: false, harnesses: [] },
     executed_scenarios: [],
     passing_scenarios: [],
     failing_scenarios: [],
     invalid_execution_scenarios: [],
+    stale_execution_scenarios: [],
+    unapproved_harness_scenarios: [],
+    unverified_artifact_scenarios: [],
     missing_execution_scenarios: [],
     execution_evidence: [],
     execution_covered: false,
+    provenance_required: false,
+    provenance_covered: false,
+    expected_revision: null,
     covered: false
   };
 }
@@ -266,6 +308,50 @@ function isValidScenarioResult(result) {
   const passed = result.expectations_passed;
   const failed = result.expectations_failed;
   return Number.isInteger(total) && total > 0 && Number.isInteger(passed) && Number.isInteger(failed) && passed + failed === total;
+}
+
+function normalizeExecutionRequirement(value, path, errors) {
+  if (value === undefined || value === false) {
+    return { required: false, current_revision: false, artifacts: false, harnesses: [] };
+  }
+  if (value === true) {
+    return { required: true, current_revision: false, artifacts: false, harnesses: [] };
+  }
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be a boolean or object`);
+    return { required: false, current_revision: false, artifacts: false, harnesses: [] };
+  }
+
+  for (const field of ["required", "current_revision", "artifacts"]) {
+    if (value[field] !== undefined && typeof value[field] !== "boolean") errors.push(`${path}.${field} must be a boolean`);
+  }
+  if (value.harnesses !== undefined && (!Array.isArray(value.harnesses) || value.harnesses.some((item) => !isNonEmptyString(item)))) {
+    errors.push(`${path}.harnesses must be an array of non-empty strings`);
+  }
+
+  const requirement = {
+    required: value.required ?? true,
+    current_revision: value.current_revision === true,
+    artifacts: value.artifacts === true,
+    harnesses: Array.isArray(value.harnesses) ? [...new Set(value.harnesses.map((item) => item.trim()))] : []
+  };
+  if (!requirement.required && (requirement.current_revision || requirement.artifacts || requirement.harnesses.length > 0)) {
+    errors.push(`${path}.required cannot be false when provenance constraints are configured`);
+  }
+  return requirement;
+}
+
+function executionEligibility(report, requirement, expectedRevision) {
+  const reasons = [];
+  const provenance = report.execution_provenance;
+  if (requirement.current_revision) {
+    if (!expectedRevision || provenance?.git_revision !== expectedRevision) reasons.push("revision_mismatch");
+  }
+  if (requirement.harnesses.length > 0 && !requirement.harnesses.includes(provenance?.harness_id)) {
+    reasons.push("unapproved_harness");
+  }
+  if (requirement.artifacts && provenance?.verified !== true) reasons.push("artifacts_unverified");
+  return { eligible: reasons.length === 0, reasons };
 }
 
 function matchesGlob(pattern, value) {

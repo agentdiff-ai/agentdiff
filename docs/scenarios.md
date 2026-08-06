@@ -72,9 +72,12 @@ node packages/cli/bin/agentdiff.js run \
   --base traces/base.json \
   --head traces/head.json \
   --scenario .agentdiff/scenarios/refund.json \
+  --harness-id support-ticket-recorded \
   --out .agentdiff/runs/evidence/refund
 ```
 
 The report includes a `scenario_result` with per-expectation pass/fail reasons. A failed scenario exits nonzero after `report.json` and `report.md` are written. `agentdiff plan --run-reports <path>` can then require passing scenario evidence for newly added capabilities.
 
-The evaluator verifies the supplied trace. Harness adapters remain responsible for executing the agent and faithfully normalizing the resulting tool calls, state, files, and test results.
+The run report records the current Git revision, harness ID, and SHA-256 hashes of the base trace, head trace, and scenario. A capability policy can require `plan` to re-verify those repository-local artifacts before accepting the result.
+
+The evaluator verifies the supplied trace. Harness adapters remain responsible for executing the agent and faithfully normalizing the resulting tool calls, state, files, and test results. Provenance checks are workspace integrity checks, not signed attestation.

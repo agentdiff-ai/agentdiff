@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   analyzeTracePair,
   buildAgentMap,
@@ -32,7 +33,8 @@ async function main(argv) {
       base: "examples/support-ticket-agent/traces/base.json",
       head: "examples/support-ticket-agent/traces/head.json",
       out,
-      scenarioPath: readOption(argv, "--scenario")
+      scenarioPath: readOption(argv, "--scenario"),
+      harnessId: readOption(argv, "--harness-id") ?? "support-ticket-recorded"
     });
     return;
   }
@@ -76,7 +78,8 @@ async function main(argv) {
       out,
       policyPath: readOption(argv, "--policy") ?? "agentdiff.policy.json",
       scenariosPath: readOption(argv, "--scenarios") ?? path.join(".agentdiff", "scenarios"),
-      runReportsPath: readOption(argv, "--run-reports")
+      runReportsPath: readOption(argv, "--run-reports"),
+      expectedRevision: resolveGitRevision(readOption(argv, "--head") ?? "HEAD")
     });
     return;
   }
@@ -102,14 +105,21 @@ async function main(argv) {
         base: path.join("examples", example, "traces", "recorded", "base.json"),
         head: path.join("examples", example, "traces", "recorded", "head.json"),
         out,
-        scenarioPath: readOption(argv, "--scenario")
+        scenarioPath: readOption(argv, "--scenario"),
+        harnessId: readOption(argv, "--harness-id") ?? `${example}-recorded`
       });
       return;
     }
 
     const base = readRequiredOption(argv, "--base");
     const head = readRequiredOption(argv, "--head");
-    await run({ base, head, out, scenarioPath: readOption(argv, "--scenario") });
+    await run({
+      base,
+      head,
+      out,
+      scenarioPath: readOption(argv, "--scenario"),
+      harnessId: readOption(argv, "--harness-id") ?? process.env.AGENTDIFF_HARNESS_ID ?? "recorded-trace"
+    });
     return;
   }
 
@@ -154,7 +164,7 @@ async function init({ force, githubAction }) {
   console.log("tip: suppressions require reason and expires; suppressed findings stay visible in reports.");
 }
 
-async function run({ base, head, out, scenarioPath }) {
+async function run({ base, head, out, scenarioPath, harnessId }) {
   const basePath = path.resolve(process.cwd(), base);
   const headPath = path.resolve(process.cwd(), head);
   const outDir = path.resolve(process.cwd(), out);
@@ -162,7 +172,8 @@ async function run({ base, head, out, scenarioPath }) {
   const baseTrace = readJson(basePath);
   const headTrace = readJson(headPath);
   const scenario = scenarioPath ? loadScenarioFile(path.resolve(process.cwd(), scenarioPath)) : null;
-  const report = analyzeTracePair({ baseTrace, headTrace, scenario });
+  const executionProvenance = buildExecutionProvenance({ basePath, headPath, scenarioPath, harnessId });
+  const report = analyzeTracePair({ baseTrace, headTrace, scenario, executionProvenance });
   const markdown = renderMarkdownReport(report);
 
   fs.mkdirSync(outDir, { recursive: true });
@@ -216,7 +227,7 @@ async function classify({ files, out }) {
   console.log(`report: ${path.join(outDir, "report.md")}`);
 }
 
-async function plan({ files, out, policyPath, scenariosPath, runReportsPath }) {
+async function plan({ files, out, policyPath, scenariosPath, runReportsPath, expectedRevision }) {
   const outDir = path.resolve(process.cwd(), out);
   const classificationReport = buildClassificationForInputs(files);
   const policyState = readCapabilityPolicy(policyPath);
@@ -227,6 +238,7 @@ async function plan({ files, out, policyPath, scenariosPath, runReportsPath }) {
     policy: policyState.policy,
     scenarios,
     runReports: runReportState.reports,
+    expectedRevision,
     policySource: policyState.source,
     warnings: [...policyState.warnings, ...runReportState.warnings]
   });
@@ -246,6 +258,48 @@ async function plan({ files, out, policyPath, scenariosPath, runReportsPath }) {
   console.log(`report: ${path.join(outDir, "report.md")}`);
 
   if (report.decision === "block") process.exitCode = 1;
+}
+
+function buildExecutionProvenance({ basePath, headPath, scenarioPath, harnessId }) {
+  const artifacts = {
+    base_trace: artifactDescriptor(basePath),
+    head_trace: artifactDescriptor(headPath)
+  };
+  if (scenarioPath) artifacts.scenario = artifactDescriptor(path.resolve(process.cwd(), scenarioPath));
+
+  return {
+    schema_version: "0.1",
+    git_revision: resolveGitRevision("HEAD"),
+    harness_id: harnessId || "recorded-trace",
+    generated_at: new Date().toISOString(),
+    artifacts
+  };
+}
+
+function artifactDescriptor(filePath) {
+  const portable = portableArtifactPath(filePath);
+  return {
+    path: portable.path,
+    repository_local: portable.repositoryLocal,
+    sha256: sha256File(filePath)
+  };
+}
+
+function portableArtifactPath(filePath) {
+  const relative = path.relative(process.cwd(), filePath).replaceAll("\\", "/");
+  const repositoryLocal = relative !== ".." && !relative.startsWith("../");
+  return {
+    path: repositoryLocal ? relative : path.basename(filePath),
+    repositoryLocal
+  };
+}
+
+function sha256File(filePath) {
+  return createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function resolveGitRevision(ref) {
+  return readGitOutput(["rev-parse", ref]) || null;
 }
 
 function buildClassificationForInputs(files) {
@@ -325,11 +379,61 @@ function readRunReports(runReportsPath) {
       } catch (error) {
         throw new Error(`could not parse run report ${filePath}: ${error.message}`);
       }
-      if (report?.scenario_result) reports.push({ ...report, source_path: path.relative(process.cwd(), filePath).replaceAll("\\", "/") });
+      if (report?.scenario_result) {
+        reports.push({
+          ...report,
+          source_path: path.relative(process.cwd(), filePath).replaceAll("\\", "/"),
+          execution_provenance: verifyExecutionArtifacts(report.execution_provenance)
+        });
+      }
     }
   }
 
   return { reports, warnings };
+}
+
+function verifyExecutionArtifacts(provenance) {
+  if (!provenance || typeof provenance !== "object") {
+    return { schema_version: "0.1", verified: false, verification_errors: ["execution provenance is missing"] };
+  }
+
+  const errors = [];
+  const root = path.resolve(process.cwd());
+  const artifacts = provenance.artifacts && typeof provenance.artifacts === "object" ? provenance.artifacts : {};
+  const required = ["base_trace", "head_trace", "scenario"];
+
+  for (const name of required) {
+    const artifact = artifacts[name];
+    if (!artifact?.path || !artifact?.sha256) {
+      errors.push(`${name} hash metadata is missing`);
+      continue;
+    }
+    if (artifact.repository_local === false) {
+      errors.push(`${name} path is outside the repository`);
+      continue;
+    }
+    const absolutePath = path.resolve(root, artifact.path);
+    if (absolutePath !== root && !absolutePath.startsWith(`${root}${path.sep}`)) {
+      errors.push(`${name} path is outside the repository`);
+      continue;
+    }
+    if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) {
+      errors.push(`${name} artifact is missing: ${artifact.path}`);
+      continue;
+    }
+    const realPath = fs.realpathSync(absolutePath);
+    if (realPath !== root && !realPath.startsWith(`${root}${path.sep}`)) {
+      errors.push(`${name} path resolves outside the repository`);
+      continue;
+    }
+    if (sha256File(realPath) !== artifact.sha256) errors.push(`${name} hash does not match: ${artifact.path}`);
+  }
+
+  return {
+    ...provenance,
+    verified: errors.length === 0,
+    verification_errors: errors
+  };
 }
 
 function collectJsonFiles(inputPath, files) {
@@ -1552,7 +1656,7 @@ Commands:
   agentdiff demo
     Run the support-ticket regression demo.
 
-  agentdiff run --base <trace.json> --head <trace.json> [--scenario <scenario.json>] [--out <dir>]
+  agentdiff run --base <trace.json> --head <trace.json> [--scenario <scenario.json>] [--harness-id <id>] [--out <dir>]
     Compare base/head normalized traces and write report.json + report.md.
 
   agentdiff run --example coding-agent-harness --recorded [--out <dir>]

@@ -36,7 +36,12 @@ The command always writes `report.json` and `report.md`. A `block` decision exit
       "require": {
         "scenarios": ["refund_requires_human_approval"],
         "confirmation": true,
-        "execution": true
+        "execution": {
+          "required": true,
+          "current_revision": true,
+          "artifacts": true,
+          "harnesses": ["support-ticket-recorded"]
+        }
       },
       "decision": {
         "covered": "review",
@@ -53,7 +58,7 @@ The command always writes `report.json` and `report.md`. A `block` decision exit
 
 - `allow`: no consequential capability or guardrail change requires review, or an explicit rule allows a covered capability.
 - `review`: a capability is policy-covered but still deserves human review, an unmatched capability uses the default review decision, or a guardrail was removed.
-- `block`: a matching rule is missing a required scenario or confirmation expectation, or a rule with `execution: true` has no passing scenario result in the supplied run reports.
+- `block`: a matching rule is missing a required scenario or confirmation expectation, or required run evidence is missing, failing, stale, produced by an unapproved harness, or backed by altered artifacts.
 
 Overall precedence is `block`, then `review`, then `allow`.
 
@@ -77,14 +82,17 @@ node packages/cli/bin/agentdiff.js run \
   --base traces/base.json \
   --head traces/head.json \
   --scenario .agentdiff/scenarios/refund.json \
+  --harness-id support-ticket-recorded \
   --out .agentdiff/runs/evidence/refund
 ```
 
 When scenario expectations fail, `run` writes its report and exits nonzero. CI can use `continue-on-error: true` for that evidence step, then let `plan --run-reports .agentdiff/runs/evidence` produce the final policy decision and sticky comment.
 
-Evidence aggregation is conservative: every supplied result for a required scenario must be structurally valid and pass. Conflicting pass/fail results or malformed result summaries do not satisfy policy coverage.
+Evidence aggregation is conservative: every eligible supplied result for a required scenario must be structurally valid and pass. Conflicting pass/fail results or malformed result summaries do not satisfy policy coverage.
 
-Run evidence is a deterministic evaluation of the supplied normalized trace. The plan records the report path and result, but v0 does not cryptographically attest how the trace was produced. Recorded and live harness provenance remain the caller's responsibility.
+`run` records the current Git revision, a stable harness ID, and SHA-256 hashes for the base trace, head trace, and scenario. When policy enables `current_revision`, `artifacts`, or `harnesses`, `plan` only accepts evidence for the planned head revision, from an approved harness, whose repository-local artifacts still match the recorded hashes.
+
+This is an integrity check inside the same trusted CI workspace. It prevents stale or accidentally copied evidence from satisfying policy, but it is not a signature, remote attestation, or proof that a harness faithfully represented model execution. Keep trace and scenario artifacts inside the repository workspace so `plan` can re-read and verify them.
 
 ## Current scope
 

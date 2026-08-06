@@ -388,7 +388,7 @@ export function buildAgentMap({ files, repo = process.cwd(), entrypointGlobs = [
   };
 }
 
-export function analyzeTracePair({ baseTrace, headTrace, scenario }) {
+export function analyzeTracePair({ baseTrace, headTrace, scenario, executionProvenance }) {
   const findings = [];
   const baseTools = baseTrace.tool_calls ?? [];
   const headTools = headTrace.tool_calls ?? [];
@@ -412,6 +412,7 @@ export function analyzeTracePair({ baseTrace, headTrace, scenario }) {
     behavior_status: behaviorStatus,
     scenario_id: headTrace.scenario_id ?? baseTrace.scenario_id,
     scenario_result: scenarioResult,
+    execution_provenance: executionProvenance ?? null,
     behavior_findings: explainedFindings,
     traces: {
       base: summarizeTrace(baseTrace),

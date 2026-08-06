@@ -25,6 +25,7 @@ jobs:
           --base examples/support-ticket-agent/traces/base.json
           --head examples/support-ticket-agent/traces/head.json
           --scenario examples/support-ticket-agent/scenario.json
+          --harness-id support-ticket-recorded
           --out .agentdiff/runs/evidence/refund-approval
 
       - uses: ./
