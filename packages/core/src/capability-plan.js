@@ -50,6 +50,12 @@ export function normalizeCapabilityPolicy(value, { source = "capability policy" 
     if (rule.require?.confirmation !== undefined && typeof rule.require.confirmation !== "boolean") {
       errors.push(`${prefix}.require.confirmation must be a boolean`);
     }
+    if (rule.require?.execution !== undefined && typeof rule.require.execution !== "boolean") {
+      errors.push(`${prefix}.require.execution must be a boolean`);
+    }
+    if (rule.require?.execution === true && (!Array.isArray(requiredScenarios) || requiredScenarios.length === 0)) {
+      errors.push(`${prefix}.require.execution needs at least one required scenario`);
+    }
 
     const covered = rule.decision?.covered ?? "review";
     const uncovered = rule.decision?.uncovered ?? "block";
@@ -63,7 +69,8 @@ export function normalizeCapabilityPolicy(value, { source = "capability policy" 
       reason,
       require: {
         scenarios: Array.isArray(requiredScenarios) ? [...new Set(requiredScenarios.map((item) => item.trim()))] : [],
-        confirmation: rule.require?.confirmation === true
+        confirmation: rule.require?.confirmation === true,
+        execution: rule.require?.execution === true
       },
       decision: { covered, uncovered }
     };
@@ -78,7 +85,7 @@ export function normalizeCapabilityPolicy(value, { source = "capability policy" 
   };
 }
 
-export function buildCapabilityPlan({ classificationReport, policy, scenarios = [], policySource = "agentdiff.policy.json", warnings = [] }) {
+export function buildCapabilityPlan({ classificationReport, policy, scenarios = [], runReports = [], policySource = "agentdiff.policy.json", warnings = [] }) {
   const normalizedPolicy = normalizeCapabilityPolicy(policy, { source: policySource });
   const scenarioById = new Map();
   for (const scenario of scenarios) {
@@ -91,7 +98,7 @@ export function buildCapabilityPlan({ classificationReport, policy, scenarios = 
   for (const finding of classificationReport.diff_aware_findings ?? []) {
     for (const capability of finding.added_high_risk_calls ?? []) {
       const rule = normalizedPolicy.rules.find((candidate) => matchesRule(candidate, capability, finding.path));
-      const coverage = rule ? evaluateCoverage(rule, capability, scenarioById) : emptyCoverage();
+      const coverage = rule ? evaluateCoverage(rule, capability, scenarioById, runReports) : emptyCoverage();
       const decision = rule
         ? coverage.covered ? rule.decision.covered : rule.decision.uncovered
         : normalizedPolicy.defaults.unmatched;
@@ -131,6 +138,8 @@ export function buildCapabilityPlan({ classificationReport, policy, scenarios = 
   const decision = highestDecision(decisions);
   const counts = countDecisions(decisions);
   const covered = capabilityChanges.filter((change) => change.coverage.covered).length;
+  const declaredCovered = capabilityChanges.filter((change) => change.coverage.declared_covered).length;
+  const executionCovered = capabilityChanges.filter((change) => change.coverage.execution_required && change.coverage.execution_covered).length;
   const uncovered = capabilityChanges.filter((change) => change.rule_id && !change.coverage.covered).length;
 
   return {
@@ -149,6 +158,8 @@ export function buildCapabilityPlan({ classificationReport, policy, scenarios = 
       added_capabilities: capabilityChanges.length,
       removed_guardrails: controlChanges.length,
       covered,
+      declared_covered: declaredCovered,
+      execution_covered: executionCovered,
       uncovered,
       matched_rules: capabilityChanges.filter((change) => change.rule_id).length,
       unmatched_capabilities: capabilityChanges.filter((change) => !change.rule_id).length,
@@ -170,7 +181,7 @@ export function buildCapabilityPlan({ classificationReport, policy, scenarios = 
   };
 }
 
-function evaluateCoverage(rule, capability, scenarioById) {
+function evaluateCoverage(rule, capability, scenarioById, runReports) {
   const requiredScenarios = rule.require.scenarios;
   const presentScenarios = requiredScenarios.filter((id) => scenarioById.has(id));
   const missingScenarios = requiredScenarios.filter((id) => !scenarioById.has(id));
@@ -179,6 +190,32 @@ function evaluateCoverage(rule, capability, scenarioById) {
       expectation.type === "requires_confirmation" && matchesGlob(expectation.before_tool, capability)
     )
   );
+  const reportsForScenario = (id) => runReports.filter((report) => report.scenario_result?.scenario_id === id);
+  const validReportsForScenario = (id) => reportsForScenario(id).filter((report) => isValidScenarioResult(report.scenario_result));
+  const executedScenarios = requiredScenarios.filter((id) => validReportsForScenario(id).length > 0);
+  const passingScenarios = requiredScenarios.filter((id) => {
+    const matching = reportsForScenario(id);
+    const valid = validReportsForScenario(id);
+    return matching.length > 0 && valid.length === matching.length && valid.every((report) => report.scenario_result.status === "pass");
+  });
+  const failingScenarios = requiredScenarios.filter((id) => validReportsForScenario(id).some((report) => report.scenario_result.status === "fail"));
+  const invalidExecutionScenarios = requiredScenarios.filter((id) => reportsForScenario(id).some((report) => !isValidScenarioResult(report.scenario_result)));
+  const missingExecutionScenarios = requiredScenarios.filter((id) => !executedScenarios.includes(id));
+  const executionCovered = !rule.require.execution || requiredScenarios.every((id) => passingScenarios.includes(id));
+  const declaredCovered = missingScenarios.length === 0 && confirmationCovered;
+  const executionEvidence = runReports
+    .filter((report) => requiredScenarios.includes(report.scenario_result?.scenario_id))
+    .map((report) => ({
+      scenario_id: report.scenario_result.scenario_id,
+      status: report.scenario_result.status,
+      source_path: report.source_path ?? null,
+      run_id: report.run_id ?? null,
+      expectations_failed: report.scenario_result.expectations_failed ?? 0,
+      failed_expectations: (report.scenario_result.expectation_results ?? [])
+        .filter((result) => result.status === "fail")
+        .slice(0, 5)
+        .map((result) => ({ type: result.type, reason: result.reason, evidence: result.evidence ?? [] }))
+    }));
 
   return {
     required_scenarios: requiredScenarios,
@@ -186,7 +223,16 @@ function evaluateCoverage(rule, capability, scenarioById) {
     missing_scenarios: missingScenarios,
     confirmation_required: rule.require.confirmation,
     confirmation_covered: confirmationCovered,
-    covered: missingScenarios.length === 0 && confirmationCovered
+    declared_covered: declaredCovered,
+    execution_required: rule.require.execution,
+    executed_scenarios: executedScenarios,
+    passing_scenarios: passingScenarios,
+    failing_scenarios: failingScenarios,
+    invalid_execution_scenarios: invalidExecutionScenarios,
+    missing_execution_scenarios: missingExecutionScenarios,
+    execution_evidence: executionEvidence,
+    execution_covered: executionCovered,
+    covered: declaredCovered && executionCovered
   };
 }
 
@@ -197,12 +243,29 @@ function emptyCoverage() {
     missing_scenarios: [],
     confirmation_required: false,
     confirmation_covered: false,
+    declared_covered: false,
+    execution_required: false,
+    executed_scenarios: [],
+    passing_scenarios: [],
+    failing_scenarios: [],
+    invalid_execution_scenarios: [],
+    missing_execution_scenarios: [],
+    execution_evidence: [],
+    execution_covered: false,
     covered: false
   };
 }
 
 function matchesRule(rule, capability, filePath) {
   return matchesGlob(rule.capability, capability) && (!rule.path || matchesGlob(rule.path, normalizePath(filePath)));
+}
+
+function isValidScenarioResult(result) {
+  if (!result || !["pass", "fail"].includes(result.status)) return false;
+  const total = result.expectations_total;
+  const passed = result.expectations_passed;
+  const failed = result.expectations_failed;
+  return Number.isInteger(total) && total > 0 && Number.isInteger(passed) && Number.isInteger(failed) && passed + failed === total;
 }
 
 function matchesGlob(pattern, value) {

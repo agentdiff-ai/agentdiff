@@ -39,6 +39,8 @@ function buildArgs(commandName, outDir) {
     if (example) args.push("--example", example);
     if (truthyInput("recorded")) args.push("--recorded");
     if (truthyInput("live")) args.push("--live");
+    const scenario = input("scenario");
+    if (scenario) args.push("--scenario", scenario);
     args.push("--out", outDir);
 
     if (!example && !truthyInput("live")) {
@@ -61,8 +63,10 @@ function buildArgs(commandName, outDir) {
     }
     const policy = input("policy");
     const scenarios = input("scenarios");
+    const runReports = input("run-reports");
     if (policy) args.push("--policy", policy);
     if (scenarios) args.push("--scenarios", scenarios);
+    if (runReports) args.push("--run-reports", runReports);
     args.push("--out", outDir);
     return args;
   }

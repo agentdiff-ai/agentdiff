@@ -35,10 +35,42 @@ const classificationReport = {
   suppressed_findings: []
 };
 
+const passingRunReport = {
+  mode: "base_head_light",
+  scenario_result: {
+    scenario_id: "refund_requires_human_approval",
+    status: "pass",
+    expectations_total: 2,
+    expectations_passed: 2,
+    expectations_failed: 0,
+    expectation_results: []
+  }
+};
+const failingRunReport = {
+  mode: "base_head_light",
+  source_path: ".agentdiff/evidence/refund/report.json",
+  scenario_result: {
+    scenario_id: "refund_requires_human_approval",
+    status: "fail",
+    expectations_total: 2,
+    expectations_passed: 1,
+    expectations_failed: 1,
+    expectation_results: [
+      {
+        type: "requires_confirmation",
+        status: "fail",
+        reason: "issueRefund executed without confirmed=true",
+        evidence: ["issueRefund: confirmed=no"]
+      }
+    ]
+  }
+};
+
 const covered = buildCapabilityPlan({
   classificationReport,
   policy,
   scenarios: [scenario],
+  runReports: [passingRunReport],
   policySource: "refund-policy.json"
 });
 
@@ -46,13 +78,49 @@ assert.equal(covered.decision, "review");
 assert.equal(covered.summary.added_capabilities, 2);
 assert.equal(covered.summary.removed_guardrails, 1);
 assert.equal(covered.summary.covered, 1);
+assert.equal(covered.summary.declared_covered, 1);
 assert.equal(covered.summary.unmatched_capabilities, 1);
 assert.equal(covered.capability_changes[0].rule_id, "refunds-require-approval");
 assert.equal(covered.capability_changes[0].coverage.confirmation_covered, true);
+assert.equal(covered.capability_changes[0].coverage.execution_covered, true);
+assert.deepEqual(covered.capability_changes[0].coverage.passing_scenarios, ["refund_requires_human_approval"]);
 
 const uncovered = buildCapabilityPlan({ classificationReport, policy, scenarios: [], policySource: "refund-policy.json" });
 assert.equal(uncovered.decision, "block");
 assert.deepEqual(uncovered.capability_changes[0].coverage.missing_scenarios, ["refund_requires_human_approval"]);
+
+const failingExecution = buildCapabilityPlan({
+  classificationReport,
+  policy,
+  scenarios: [scenario],
+  runReports: [failingRunReport],
+  policySource: "refund-policy.json"
+});
+assert.equal(failingExecution.decision, "block");
+assert.deepEqual(failingExecution.capability_changes[0].coverage.failing_scenarios, ["refund_requires_human_approval"]);
+assert.equal(failingExecution.capability_changes[0].coverage.execution_evidence[0].failed_expectations[0].type, "requires_confirmation");
+
+const failingMarkdown = renderMarkdownReport(failingExecution);
+assert.match(failingMarkdown, /run evidence: refund_requires_human_approval=fail/);
+assert.match(failingMarkdown, /FAIL requires_confirmation: issueRefund executed without confirmed=true/);
+
+const conflictingExecution = buildCapabilityPlan({
+  classificationReport,
+  policy,
+  scenarios: [scenario],
+  runReports: [passingRunReport, failingRunReport]
+});
+assert.equal(conflictingExecution.decision, "block");
+assert.deepEqual(conflictingExecution.capability_changes[0].coverage.failing_scenarios, ["refund_requires_human_approval"]);
+
+const malformedExecution = buildCapabilityPlan({
+  classificationReport,
+  policy,
+  scenarios: [scenario],
+  runReports: [{ scenario_result: { scenario_id: "refund_requires_human_approval", status: "pass" } }]
+});
+assert.equal(malformedExecution.decision, "block");
+assert.deepEqual(malformedExecution.capability_changes[0].coverage.invalid_execution_scenarios, ["refund_requires_human_approval"]);
 
 const noChanges = buildCapabilityPlan({
   classificationReport: { ...classificationReport, diff_aware_findings: [] },
@@ -69,6 +137,13 @@ assert.throws(
 assert.throws(
   () => normalizeCapabilityPolicy({ version: "0.1", defaults: { unmatched: "ship" }, rules: [] }),
   CapabilityPolicyValidationError
+);
+assert.throws(
+  () => normalizeCapabilityPolicy({
+    version: "0.1",
+    rules: [{ id: "bad-execution", capability: "issueRefund", reason: "needs run", require: { execution: true } }]
+  }),
+  /needs at least one required scenario/
 );
 
 const markdown = renderMarkdownReport(uncovered);
@@ -105,8 +180,10 @@ try {
   fs.copyFileSync(path.join(fixtureRoot, "refund-policy.json"), path.join(tempRoot, "agentdiff.policy.json"));
   fs.mkdirSync(path.join(tempRoot, ".agentdiff", "scenarios"), { recursive: true });
   fs.copyFileSync(path.join(fixtureRoot, "scenarios", "refund.json"), path.join(tempRoot, ".agentdiff", "scenarios", "refund.json"));
+  fs.mkdirSync(path.join(tempRoot, ".agentdiff", "evidence"), { recursive: true });
+  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "evidence", "report.json"), JSON.stringify(passingRunReport, null, 2));
 
-  const reviewed = spawnSync(process.execPath, [cli, "plan", "--base", base, "--head", head], { cwd: tempRoot, encoding: "utf8" });
+  const reviewed = spawnSync(process.execPath, [cli, "plan", "--base", base, "--head", head, "--run-reports", ".agentdiff/evidence"], { cwd: tempRoot, encoding: "utf8" });
   assert.equal(reviewed.status, 0, reviewed.stderr);
   assert.match(reviewed.stdout, /agentdiff plan: review/);
   const reportPath = path.join(tempRoot, ".agentdiff", "runs", "latest", "report.json");
@@ -121,7 +198,8 @@ try {
       INPUT_COMMAND: "plan",
       INPUT_BASE: base,
       INPUT_HEAD: head,
-      INPUT_OUT: ".agentdiff/action-plan"
+      INPUT_OUT: ".agentdiff/action-plan",
+      "INPUT_RUN-REPORTS": ".agentdiff/evidence"
     }
   });
   assert.equal(actionRun.status, 0, actionRun.stderr);

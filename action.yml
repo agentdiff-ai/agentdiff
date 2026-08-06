@@ -22,6 +22,12 @@ inputs:
   scenarios:
     description: "Scenario directory or JSON file for plan mode. Defaults to .agentdiff/scenarios."
     required: false
+  run-reports:
+    description: "Run report file or directory for plan execution evidence."
+    required: false
+  scenario:
+    description: "Scenario JSON file to evaluate against the head trace in run mode."
+    required: false
   example:
     description: "Example name for run mode, such as coding-agent-harness."
     required: false
