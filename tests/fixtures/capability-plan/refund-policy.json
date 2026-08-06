@@ -13,7 +13,8 @@
         "scenarios": [
           "refund_requires_human_approval"
         ],
-        "confirmation": true
+        "confirmation": true,
+        "execution": true
       },
       "decision": {
         "covered": "review",

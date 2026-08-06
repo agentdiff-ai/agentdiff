@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { evaluateScenarioTrace } from "./scenario-run.js";
 export {
   SCENARIO_SCHEMA_VERSION,
   SUPPORTED_EXPECTATION_TYPES,
@@ -6,6 +7,7 @@ export {
   loadScenarioFile,
   normalizeScenario
 } from "./scenario.js";
+export { evaluateScenarioTrace } from "./scenario-run.js";
 export {
   CAPABILITY_POLICY_VERSION,
   CapabilityPolicyValidationError,
@@ -386,7 +388,7 @@ export function buildAgentMap({ files, repo = process.cwd(), entrypointGlobs = [
   };
 }
 
-export function analyzeTracePair({ baseTrace, headTrace }) {
+export function analyzeTracePair({ baseTrace, headTrace, scenario }) {
   const findings = [];
   const baseTools = baseTrace.tool_calls ?? [];
   const headTools = headTrace.tool_calls ?? [];
@@ -398,13 +400,18 @@ export function analyzeTracePair({ baseTrace, headTrace }) {
   findings.push(...compareCost(baseTrace.scenario_id, baseTrace, headTrace));
 
   const explainedFindings = findings.map(attachGenericFindingExplanation);
-  const status = statusFromFindings(explainedFindings);
+  const behaviorStatus = statusFromFindings(explainedFindings);
+
+  const scenarioResult = scenario ? evaluateScenarioTrace({ scenario, trace: headTrace }) : null;
+  const status = scenarioResult?.status === "fail" ? "fail" : behaviorStatus;
 
   return {
     run_id: new Date().toISOString().replace(/[:.]/g, "-"),
     mode: "base_head_light",
     status,
+    behavior_status: behaviorStatus,
     scenario_id: headTrace.scenario_id ?? baseTrace.scenario_id,
+    scenario_result: scenarioResult,
     behavior_findings: explainedFindings,
     traces: {
       base: summarizeTrace(baseTrace),

@@ -31,7 +31,8 @@ async function main(argv) {
     await run({
       base: "examples/support-ticket-agent/traces/base.json",
       head: "examples/support-ticket-agent/traces/head.json",
-      out
+      out,
+      scenarioPath: readOption(argv, "--scenario")
     });
     return;
   }
@@ -74,7 +75,8 @@ async function main(argv) {
       files,
       out,
       policyPath: readOption(argv, "--policy") ?? "agentdiff.policy.json",
-      scenariosPath: readOption(argv, "--scenarios") ?? path.join(".agentdiff", "scenarios")
+      scenariosPath: readOption(argv, "--scenarios") ?? path.join(".agentdiff", "scenarios"),
+      runReportsPath: readOption(argv, "--run-reports")
     });
     return;
   }
@@ -99,14 +101,15 @@ async function main(argv) {
       await run({
         base: path.join("examples", example, "traces", "recorded", "base.json"),
         head: path.join("examples", example, "traces", "recorded", "head.json"),
-        out
+        out,
+        scenarioPath: readOption(argv, "--scenario")
       });
       return;
     }
 
     const base = readRequiredOption(argv, "--base");
     const head = readRequiredOption(argv, "--head");
-    await run({ base, head, out });
+    await run({ base, head, out, scenarioPath: readOption(argv, "--scenario") });
     return;
   }
 
@@ -151,14 +154,15 @@ async function init({ force, githubAction }) {
   console.log("tip: suppressions require reason and expires; suppressed findings stay visible in reports.");
 }
 
-async function run({ base, head, out }) {
+async function run({ base, head, out, scenarioPath }) {
   const basePath = path.resolve(process.cwd(), base);
   const headPath = path.resolve(process.cwd(), head);
   const outDir = path.resolve(process.cwd(), out);
 
   const baseTrace = readJson(basePath);
   const headTrace = readJson(headPath);
-  const report = analyzeTracePair({ baseTrace, headTrace });
+  const scenario = scenarioPath ? loadScenarioFile(path.resolve(process.cwd(), scenarioPath)) : null;
+  const report = analyzeTracePair({ baseTrace, headTrace, scenario });
   const markdown = renderMarkdownReport(report);
 
   fs.mkdirSync(outDir, { recursive: true });
@@ -167,7 +171,12 @@ async function run({ base, head, out }) {
 
   console.log(`agentdiff status: ${report.status}`);
   console.log(`findings: ${report.behavior_findings.length}`);
+  if (report.scenario_result) {
+    console.log(`scenario result: ${report.scenario_result.status}`);
+    console.log(`scenario expectations: ${report.scenario_result.expectations_passed}/${report.scenario_result.expectations_total} passed`);
+  }
   console.log(`report: ${path.join(outDir, "report.md")}`);
+  if (report.scenario_result?.status === "fail") process.exitCode = 1;
 }
 
 function validateScenarioCommand(scenarioPath) {
@@ -207,17 +216,19 @@ async function classify({ files, out }) {
   console.log(`report: ${path.join(outDir, "report.md")}`);
 }
 
-async function plan({ files, out, policyPath, scenariosPath }) {
+async function plan({ files, out, policyPath, scenariosPath, runReportsPath }) {
   const outDir = path.resolve(process.cwd(), out);
   const classificationReport = buildClassificationForInputs(files);
   const policyState = readCapabilityPolicy(policyPath);
   const scenarios = readScenarioDirectory(scenariosPath);
+  const runReportState = readRunReports(runReportsPath);
   const report = buildCapabilityPlan({
     classificationReport,
     policy: policyState.policy,
     scenarios,
+    runReports: runReportState.reports,
     policySource: policyState.source,
-    warnings: policyState.warnings
+    warnings: [...policyState.warnings, ...runReportState.warnings]
   });
   const markdown = renderMarkdownReport(report);
 
@@ -229,6 +240,8 @@ async function plan({ files, out, policyPath, scenariosPath }) {
   console.log(`added capabilities: ${report.summary.added_capabilities}`);
   console.log(`removed guardrails: ${report.summary.removed_guardrails}`);
   console.log(`covered capabilities: ${report.summary.covered}`);
+  console.log(`declared-covered capabilities: ${report.summary.declared_covered}`);
+  console.log(`execution-covered capabilities: ${report.summary.execution_covered}`);
   console.log(`uncovered capabilities: ${report.summary.uncovered}`);
   console.log(`report: ${path.join(outDir, "report.md")}`);
 
@@ -290,6 +303,46 @@ function readScenarioDirectory(scenariosPath) {
   if (fs.statSync(absolutePath).isDirectory()) walk(absolutePath);
   else if (absolutePath.endsWith(".json")) files.push(absolutePath);
   return files.sort().map((filePath) => loadScenarioFile(filePath));
+}
+
+function readRunReports(runReportsPath) {
+  if (!runReportsPath) return { reports: [], warnings: [] };
+  const reports = [];
+  const warnings = [];
+
+  for (const item of runReportsPath.split(",").map((value) => value.trim()).filter(Boolean)) {
+    const absolutePath = path.resolve(process.cwd(), item);
+    if (!fs.existsSync(absolutePath)) {
+      warnings.push(`run report path not found: ${item}`);
+      continue;
+    }
+    const files = [];
+    collectJsonFiles(absolutePath, files);
+    for (const filePath of files) {
+      let report;
+      try {
+        report = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      } catch (error) {
+        throw new Error(`could not parse run report ${filePath}: ${error.message}`);
+      }
+      if (report?.scenario_result) reports.push({ ...report, source_path: path.relative(process.cwd(), filePath).replaceAll("\\", "/") });
+    }
+  }
+
+  return { reports, warnings };
+}
+
+function collectJsonFiles(inputPath, files) {
+  const stat = fs.statSync(inputPath);
+  if (stat.isFile()) {
+    if (inputPath.endsWith(".json")) files.push(inputPath);
+    return;
+  }
+  for (const entry of fs.readdirSync(inputPath, { withFileTypes: true })) {
+    const entryPath = path.join(inputPath, entry.name);
+    if (entry.isDirectory()) collectJsonFiles(entryPath, files);
+    else if (entry.isFile() && entry.name.endsWith(".json")) files.push(entryPath);
+  }
 }
 
 async function scan({ root, out }) {
@@ -1484,7 +1537,7 @@ Commands:
   agentdiff classify --base <ref> --head <ref> [--out <dir>]
     Classify files changed between two git refs.
 
-  agentdiff plan --base <ref> --head <ref> [--policy <file>] [--scenarios <dir>] [--out <dir>]
+  agentdiff plan --base <ref> --head <ref> [--policy <file>] [--scenarios <dir>] [--run-reports <path>] [--out <dir>]
     Plan added capabilities against policy and scenario coverage. Blocks uncovered changes.
 
   agentdiff scan [--root <dir>] [--out <map.json>]
@@ -1499,7 +1552,7 @@ Commands:
   agentdiff demo
     Run the support-ticket regression demo.
 
-  agentdiff run --base <trace.json> --head <trace.json> [--out <dir>]
+  agentdiff run --base <trace.json> --head <trace.json> [--scenario <scenario.json>] [--out <dir>]
     Compare base/head normalized traces and write report.json + report.md.
 
   agentdiff run --example coding-agent-harness --recorded [--out <dir>]

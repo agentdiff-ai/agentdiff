@@ -14,9 +14,17 @@ export function renderMarkdownReport(report) {
   lines.push(`run mode: ${report.mode}`);
   lines.push(`scenario: ${report.scenario_id}`);
   lines.push(`findings: ${report.behavior_findings.length}`);
+  if (report.scenario_result) {
+    lines.push(`scenario result: ${report.scenario_result.status}`);
+    lines.push(`scenario expectations: ${report.scenario_result.expectations_passed}/${report.scenario_result.expectations_total} passed`);
+  }
   lines.push(`estimated cost: $${report.cost.estimated_cost_usd.toFixed(4)}`);
   lines.push(`actual cost: $${report.cost.actual_cost_usd.toFixed(4)}`);
   lines.push("");
+
+  if (report.scenario_result) {
+    renderScenarioResult(lines, report.scenario_result);
+  }
 
   if (report.behavior_findings.length === 0) {
     lines.push("## top findings");
@@ -67,6 +75,16 @@ export function renderMarkdownReport(report) {
   return lines.join("\n");
 }
 
+function renderScenarioResult(lines, result) {
+  lines.push(`## scenario result: ${result.status}`);
+  lines.push("");
+  for (const expectation of result.expectation_results) {
+    lines.push(`- ${expectation.status === "pass" ? "PASS" : "FAIL"} ${expectation.type}: ${expectation.reason}`);
+    for (const evidence of expectation.evidence ?? []) lines.push(`  - ${evidence}`);
+  }
+  lines.push("");
+}
+
 function renderCapabilityPlan(report) {
   const lines = [];
   const blocked = report.capability_changes.filter((change) => change.decision === "block");
@@ -82,7 +100,9 @@ function renderCapabilityPlan(report) {
   lines.push(`policy: ${report.policy.source} (v${report.policy.version})`);
   lines.push(`added capabilities: ${report.summary.added_capabilities}`);
   lines.push(`removed guardrails: ${report.summary.removed_guardrails}`);
-  lines.push(`declared scenario coverage: ${report.summary.covered}`);
+  lines.push(`declared scenario coverage: ${report.summary.declared_covered}`);
+  lines.push(`passing run coverage: ${report.summary.execution_covered}`);
+  lines.push(`fully policy-covered capabilities: ${report.summary.covered}`);
   lines.push(`uncovered capabilities: ${report.summary.uncovered}`);
   lines.push(`block: ${report.summary.block}`);
   lines.push(`review: ${report.summary.review}`);
@@ -146,7 +166,23 @@ function renderCapabilityChange(lines, change) {
   lines.push(`- present: ${change.coverage.present_scenarios.join(", ") || "none"}`);
   lines.push(`- missing: ${change.coverage.missing_scenarios.join(", ") || "none"}`);
   lines.push(`- confirmation required: ${change.coverage.confirmation_required ? "yes" : "no"}`);
-  lines.push(`- confirmation covered: ${change.coverage.confirmation_covered ? "yes" : "no"}`);
+  if (change.coverage.confirmation_required) {
+    lines.push(`- confirmation covered: ${change.coverage.confirmation_covered ? "yes" : "no"}`);
+  }
+  lines.push(`- passing run required: ${change.coverage.execution_required ? "yes" : "no"}`);
+  if (change.coverage.execution_required) {
+    lines.push(`- executed: ${change.coverage.executed_scenarios.join(", ") || "none"}`);
+    lines.push(`- passing: ${change.coverage.passing_scenarios.join(", ") || "none"}`);
+    lines.push(`- failing: ${change.coverage.failing_scenarios.join(", ") || "none"}`);
+    lines.push(`- invalid run evidence: ${change.coverage.invalid_execution_scenarios.join(", ") || "none"}`);
+    lines.push(`- missing run evidence: ${change.coverage.missing_execution_scenarios.join(", ") || "none"}`);
+    for (const evidence of change.coverage.execution_evidence ?? []) {
+      lines.push(`- run evidence: ${evidence.scenario_id}=${evidence.status}${evidence.source_path ? ` (${evidence.source_path})` : ""}`);
+      for (const failure of evidence.failed_expectations ?? []) {
+        lines.push(`  - FAIL ${failure.type}: ${failure.reason}`);
+      }
+    }
+  }
   lines.push("");
   lines.push("evidence:");
   for (const item of change.evidence.slice(0, 8)) lines.push(`- ${item}`);

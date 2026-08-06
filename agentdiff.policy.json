@@ -8,12 +8,13 @@
       "id": "demo-refunds-require-approval",
       "capability": "issue_refund",
       "path": "examples/demo-support-agent/**",
-      "reason": "Direct refund execution is not approved until the change includes a human-confirmation scenario.",
+      "reason": "Direct refund execution requires a passing human-approval scenario.",
       "require": {
         "scenarios": [
-          "demo_refund_requires_human_approval"
+          "refund_requires_human_approval"
         ],
-        "confirmation": true
+        "confirmation": true,
+        "execution": true
       },
       "decision": {
         "covered": "review",
