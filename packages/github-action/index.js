@@ -48,6 +48,25 @@ function buildArgs(commandName, outDir) {
     return args;
   }
 
+  if (commandName === "plan") {
+    const files = input("files");
+    const args = ["plan"];
+    if (files) {
+      args.push("--files", files);
+    } else {
+      const base = input("base") || defaultBaseRef();
+      const head = input("head") || "HEAD";
+      if (!base) throw new Error("plan mode needs either files or base. Set files, or run on pull_request with a base ref.");
+      args.push("--base", base, "--head", head);
+    }
+    const policy = input("policy");
+    const scenarios = input("scenarios");
+    if (policy) args.push("--policy", policy);
+    if (scenarios) args.push("--scenarios", scenarios);
+    args.push("--out", outDir);
+    return args;
+  }
+
   if (commandName !== "classify") {
     throw new Error(`unsupported action command: ${commandName}`);
   }

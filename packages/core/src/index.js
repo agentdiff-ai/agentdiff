@@ -6,6 +6,12 @@ export {
   loadScenarioFile,
   normalizeScenario
 } from "./scenario.js";
+export {
+  CAPABILITY_POLICY_VERSION,
+  CapabilityPolicyValidationError,
+  buildCapabilityPlan,
+  normalizeCapabilityPolicy
+} from "./capability-plan.js";
 
 const HIGH_RISK_TAGS = new Set([
   "destructive",

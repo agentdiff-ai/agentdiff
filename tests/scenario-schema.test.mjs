@@ -80,7 +80,7 @@ try {
   assert.equal(validate.status, 0, validate.stderr);
   assert.match(validate.stdout, /valid scenario: starter_scenario/);
   assert.match(validate.stdout, /schema version: 0\.1/);
-  assert.match(validate.stdout, /expectations: 1/);
+  assert.match(validate.stdout, /expectations: 2/);
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }

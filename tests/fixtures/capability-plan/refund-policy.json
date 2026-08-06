@@ -1,0 +1,24 @@
+{
+  "version": "0.1",
+  "defaults": {
+    "unmatched": "review"
+  },
+  "rules": [
+    {
+      "id": "refunds-require-approval",
+      "capability": "issueRefund",
+      "path": "**/supportAgent.js",
+      "reason": "Refund execution requires human approval.",
+      "require": {
+        "scenarios": [
+          "refund_requires_human_approval"
+        ],
+        "confirmation": true
+      },
+      "decision": {
+        "covered": "review",
+        "uncovered": "block"
+      }
+    }
+  ]
+}

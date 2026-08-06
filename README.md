@@ -2,7 +2,7 @@
 
 Open-source CI for AI agent behavior changes.
 
-Normal CI tells you the code runs. `agentdiff` tells you whether an agent got riskier.
+Normal CI tells you the code runs. `agentdiff` tells you whether an agent's behavior boundary changed.
 
 It runs in GitHub Actions, writes a job summary, and updates one sticky PR comment. v0 is JS/TS-first, BYOK/local-CI-first, and has no hosted backend.
 
@@ -43,7 +43,7 @@ jobs:
 
       - uses: agentdiff-ai/agentdiff@v0
         with:
-          command: classify
+          command: plan
           base: origin/${{ github.base_ref }}
           head: HEAD
           github-token: ${{ github.token }}
@@ -75,10 +75,22 @@ Useful local commands:
 node packages/cli/bin/agentdiff.js demo
 node packages/cli/bin/agentdiff.js scan
 node packages/cli/bin/agentdiff.js classify --base main --head HEAD
+node packages/cli/bin/agentdiff.js plan --base main --head HEAD
 node packages/cli/bin/agentdiff.js run --example coding-agent-harness --recorded
 ```
 
-No hosted backend or model API key is required for classify, scan, deterministic zoo, recorded harness, or agent repo lab runs.
+No hosted backend or model API key is required for plan, classify, scan, deterministic zoo, recorded harness, or agent repo lab runs.
+
+## Capability Plan
+
+`agentdiff plan` turns deterministic PR evidence into `allow`, `review`, or `block` decisions. Policies can require named scenario contracts and confirmation expectations before consequential capabilities such as refunds, external messages, workflow scheduling, or state mutation are allowed through CI. v0 checks declared coverage; harness execution remains a separate `agentdiff run` step.
+
+```bash
+node packages/cli/bin/agentdiff.js init --github-action
+node packages/cli/bin/agentdiff.js plan --base main --head HEAD
+```
+
+The generated workflow uses the moving `@v0` Action channel. A blocked plan still writes the job summary and sticky PR comment before the check fails. See [docs/capability-plan.md](docs/capability-plan.md).
 
 ## Evidence
 
@@ -93,6 +105,7 @@ This is early product evidence, not a security audit, not a benchmark, and not a
 Read more:
 
 - [docs/evidence-loop.md](docs/evidence-loop.md)
+- [docs/capability-plan.md](docs/capability-plan.md)
 - [docs/why-agent-behavior-diffs.md](docs/why-agent-behavior-diffs.md)
 - [docs/agent-zoo.md](docs/agent-zoo.md)
 - [docs/agent-zoo-live.md](docs/agent-zoo-live.md)

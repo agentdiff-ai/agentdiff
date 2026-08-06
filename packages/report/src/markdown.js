@@ -1,4 +1,8 @@
 export function renderMarkdownReport(report) {
+  if (report.mode === "plan") {
+    return renderCapabilityPlan(report);
+  }
+
   if (report.mode === "classify") {
     return renderClassificationReport(report);
   }
@@ -61,6 +65,104 @@ export function renderMarkdownReport(report) {
   lines.push("");
 
   return lines.join("\n");
+}
+
+function renderCapabilityPlan(report) {
+  const lines = [];
+  const blocked = report.capability_changes.filter((change) => change.decision === "block");
+  const review = [
+    ...report.capability_changes.filter((change) => change.decision === "review"),
+    ...report.control_changes.filter((change) => change.decision === "review")
+  ];
+  const allowed = report.capability_changes.filter((change) => change.decision === "allow");
+
+  lines.push("# agentdiff capability plan");
+  lines.push("");
+  lines.push(`decision: **${report.decision.toUpperCase()}**`);
+  lines.push(`policy: ${report.policy.source} (v${report.policy.version})`);
+  lines.push(`added capabilities: ${report.summary.added_capabilities}`);
+  lines.push(`removed guardrails: ${report.summary.removed_guardrails}`);
+  lines.push(`declared scenario coverage: ${report.summary.covered}`);
+  lines.push(`uncovered capabilities: ${report.summary.uncovered}`);
+  lines.push(`block: ${report.summary.block}`);
+  lines.push(`review: ${report.summary.review}`);
+  lines.push(`allow: ${report.summary.allow}`);
+  lines.push("");
+
+  if ((report.warnings ?? []).length > 0) {
+    lines.push("## Warnings");
+    lines.push("");
+    for (const warning of report.warnings) lines.push(`- ${warning}`);
+    lines.push("");
+  }
+
+  renderCapabilityGroup(lines, "Block", blocked);
+  renderCapabilityGroup(lines, "Review", review);
+
+  if (allowed.length > 0) {
+    lines.push("<details>");
+    lines.push(`<summary>Allowed (${allowed.length})</summary>`);
+    lines.push("");
+    for (const change of allowed) renderCapabilityChange(lines, change);
+    lines.push("</details>");
+    lines.push("");
+  }
+
+  if (blocked.length === 0 && review.length === 0 && allowed.length === 0) {
+    lines.push("No added high-risk calls or removed guardrails were detected.");
+    lines.push("");
+  }
+
+  lines.push("---");
+  lines.push("This is change-control evidence, not a vulnerability claim.");
+  lines.push("");
+  return lines.join("\n");
+}
+
+function renderCapabilityGroup(lines, title, changes) {
+  lines.push(`## ${title} (${changes.length})`);
+  lines.push("");
+  if (changes.length === 0) {
+    lines.push(`No ${title.toLowerCase()} decisions.`);
+    lines.push("");
+    return;
+  }
+  for (const change of changes) {
+    if (change.kind === "removed_guardrail_call") renderControlChange(lines, change);
+    else renderCapabilityChange(lines, change);
+  }
+}
+
+function renderCapabilityChange(lines, change) {
+  lines.push(`### ${change.capability}`);
+  lines.push("");
+  lines.push(`file: ${change.path}`);
+  lines.push(`decision: ${change.decision}`);
+  lines.push(`policy rule: ${change.rule_id ?? "unmatched"}`);
+  lines.push(`reason: ${change.reason}`);
+  lines.push("");
+  lines.push("scenario coverage:");
+  lines.push(`- required: ${change.coverage.required_scenarios.join(", ") || "none"}`);
+  lines.push(`- present: ${change.coverage.present_scenarios.join(", ") || "none"}`);
+  lines.push(`- missing: ${change.coverage.missing_scenarios.join(", ") || "none"}`);
+  lines.push(`- confirmation required: ${change.coverage.confirmation_required ? "yes" : "no"}`);
+  lines.push(`- confirmation covered: ${change.coverage.confirmation_covered ? "yes" : "no"}`);
+  lines.push("");
+  lines.push("evidence:");
+  for (const item of change.evidence.slice(0, 8)) lines.push(`- ${item}`);
+  lines.push("");
+}
+
+function renderControlChange(lines, change) {
+  lines.push(`### Removed guardrail: ${change.guardrail}`);
+  lines.push("");
+  lines.push(`file: ${change.path}`);
+  lines.push(`decision: ${change.decision}`);
+  lines.push(`reason: ${change.reason}`);
+  lines.push("");
+  lines.push("evidence:");
+  for (const item of change.evidence.slice(0, 8)) lines.push(`- ${item}`);
+  lines.push("");
 }
 
 function formatChangedFiles(files) {
