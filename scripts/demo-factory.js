@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { renderDesignedVideo, writeDesignedAudit } from "./demo-factory-designed.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
@@ -32,6 +33,25 @@ export function validateDemoSpec(spec) {
       throw new Error(`shot ${shot.id} requires expectedText`);
     }
   }
+  if (spec.render?.mode === "designed") {
+    if (!Array.isArray(spec.render.scenes) || spec.render.scenes.length < 2) {
+      throw new Error("designed demo requires at least two render scenes");
+    }
+    if (spec.render.transitions && spec.render.transitions.length !== spec.render.scenes.length - 1) {
+      throw new Error("designed demo requires one transition per scene boundary");
+    }
+    for (const scene of spec.render.scenes) {
+      for (const field of ["id", "kind", "durationSeconds", "voiceover"]) {
+        if (scene[field] === undefined || scene[field] === null || scene[field] === "") {
+          throw new Error(`render scene ${scene.id ?? "(unknown)"} missing ${field}`);
+        }
+      }
+    }
+  }
+}
+
+export function getRenderUnits(spec) {
+  return spec.render?.mode === "designed" ? spec.render.scenes : spec.shots;
 }
 
 export function buildSrt(shots) {
@@ -127,8 +147,16 @@ function demoPaths(spec) {
     subtitles: path.join(final, "subtitles.srt"),
     voiceoverText: path.join(final, "voiceover.txt"),
     voiceoverWav: path.join(final, "voiceover.wav"),
+    humanVoiceoverWav: path.join(final, "voiceover-human.wav"),
     finalMp4: path.join(final, spec.outputFile),
-    previewFrames: path.join(final, "preview-frames")
+    previewFrames: path.join(final, "preview-frames"),
+    designed: path.join(root, "designed"),
+    designedScenes: path.join(root, "designed", "scenes"),
+    designedClips: path.join(root, "designed", "clips"),
+    alignment: path.join(final, "alignment"),
+    alignmentTransitions: path.join(final, "alignment", "transitions"),
+    alignmentContactSheet: path.join(final, "alignment", "contact-sheet.png"),
+    transitionContactSheet: path.join(final, "alignment", "transition-contact-sheet.png")
   };
 }
 
@@ -218,30 +246,39 @@ function renderDemo(spec, paths) {
 
   const ffmpeg = findCommand("ffmpeg");
   if (!ffmpeg) throw new Error("ffmpeg was not found.");
-  const voiceoverText = spec.shots.map((shot) => shot.voiceover).join("\n\n");
+  const units = getRenderUnits(spec);
+  const voiceoverText = units.map((unit) => unit.voiceover).join("\n\n");
   fs.writeFileSync(paths.voiceoverText, `${voiceoverText}\n`);
-  fs.writeFileSync(paths.subtitles, buildSrt(spec.shots));
+  fs.writeFileSync(paths.subtitles, buildSrt(units));
 
-  const audio = generateVoiceover(spec, paths, ffmpeg);
-  const clipPaths = spec.shots.map((shot, index) => renderClip(spec, paths, shot, index, ffmpeg));
-  const concatPath = path.join(paths.clips, "clips.txt");
-  fs.writeFileSync(concatPath, clipPaths.map((clipPath) => `file '${ffmpegPath(clipPath)}'`).join("\n"));
-  const silentVideo = path.join(paths.clips, "video-no-audio.mp4");
-  run(ffmpeg, ["-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", silentVideo], "concat video clips");
+  const audio = generateVoiceover(spec, paths, ffmpeg, units);
+  let silentVideo;
+  if (spec.render?.mode === "designed") {
+    const chrome = findChrome();
+    const result = renderDesignedVideo({ spec, paths, ffmpeg, chrome, run });
+    silentVideo = result.silentVideo;
+  } else {
+    const clipPaths = spec.shots.map((shot, index) => renderClip(spec, paths, shot, index, ffmpeg));
+    const concatPath = path.join(paths.clips, "clips.txt");
+    fs.writeFileSync(concatPath, clipPaths.map((clipPath) => `file '${ffmpegPath(clipPath)}'`).join("\n"));
+    silentVideo = path.join(paths.clips, "video-no-audio.mp4");
+    run(ffmpeg, ["-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", silentVideo], "concat video clips");
+  }
 
   const muxArgs = ["-y", "-i", silentVideo];
   if (audio.ok) muxArgs.push("-i", paths.voiceoverWav);
-  muxArgs.push("-i", paths.subtitles);
   muxArgs.push("-map", "0:v");
-  if (audio.ok) muxArgs.push("-map", "1:a", "-map", "2:s", "-c:a", "aac");
-  else muxArgs.push("-map", "1:s");
-  muxArgs.push("-c:v", "copy", "-c:s", "mov_text", paths.finalMp4);
+  if (audio.ok) muxArgs.push("-map", "1:a", "-c:a", "aac");
+  muxArgs.push("-c:v", "copy", paths.finalMp4);
   run(ffmpeg, muxArgs, "mux final video");
 
   const duration = totalDuration(spec);
   for (const second of previewTimes(duration)) {
     const frame = path.join(paths.previewFrames, `preview-${String(second).padStart(2, "0")}.png`);
     run(ffmpeg, ["-y", "-ss", String(second), "-i", paths.finalMp4, "-frames:v", "1", frame], `extract preview frame ${second}s`);
+  }
+  if (spec.render?.mode === "designed") {
+    writeDesignedAudit({ spec, paths, ffmpeg, run, finalMp4: paths.finalMp4 });
   }
 
   fs.writeFileSync(paths.renderPlan, renderPlan(spec, paths, audio));
@@ -282,6 +319,7 @@ function checkDemo(spec, paths) {
   if (!ffprobe) throw new Error("ffprobe was not found.");
   const failures = [];
   const warnings = [];
+  const voiceoverStatus = readVoiceoverStatus(paths);
   if (!fs.existsSync(paths.finalMp4)) failures.push(`missing mp4: ${paths.finalMp4}`);
   const capture = readJsonIfExists(paths.captureResults);
   for (const shot of spec.shots) {
@@ -302,6 +340,7 @@ function checkDemo(spec, paths) {
     const duration = Number(probe.format?.duration ?? 0);
     const video = probe.streams?.find((stream) => stream.codec_type === "video");
     const audio = probe.streams?.find((stream) => stream.codec_type === "audio");
+    const subtitleStreams = probe.streams?.filter((stream) => stream.codec_type === "subtitle") ?? [];
     if (!video) failures.push("missing video stream");
     else {
       if (video.width !== (spec.video?.width ?? defaultWidth)) failures.push(`video width is ${video.width}`);
@@ -310,12 +349,24 @@ function checkDemo(spec, paths) {
     if (duration < spec.video.minDurationSeconds || duration > spec.video.maxDurationSeconds) {
       failures.push(`duration ${duration.toFixed(2)}s outside ${spec.video.minDurationSeconds}-${spec.video.maxDurationSeconds}s`);
     }
-    const voiceoverStatus = readVoiceoverStatus(paths);
     if (!audio && voiceoverStatus.ok !== false) failures.push("missing audio stream");
     if (!audio && voiceoverStatus.ok === false) warnings.push(`captions-only fallback: ${voiceoverStatus.reason}`);
+    if (audio && spec.voice?.requireHumanForFinal && voiceoverStatus.voice !== "human") {
+      warnings.push(`synthetic voiceover placeholder; add ${paths.humanVoiceoverWav} before distribution`);
+    }
+    if (!fs.existsSync(paths.subtitles) || fs.statSync(paths.subtitles).size === 0) failures.push("missing external subtitles.srt");
+    if (subtitleStreams.length > 0) failures.push("embedded subtitle stream may duplicate visual lower thirds");
+    if (spec.render?.mode === "designed") {
+      const expectedSeconds = Math.floor(totalDuration(spec));
+      const secondFrames = countMatchingFiles(paths.alignment, /^sec-\d+\.png$/);
+      const expectedTransitionFrames = (getRenderUnits(spec).length - 1) * 3;
+      const transitionFrames = countMatchingFiles(paths.alignmentTransitions, /^transition-\d+\.png$/);
+      if (secondFrames !== expectedSeconds) failures.push(`alignment audit has ${secondFrames}/${expectedSeconds} second frames`);
+      if (transitionFrames !== expectedTransitionFrames) failures.push(`transition audit has ${transitionFrames}/${expectedTransitionFrames} frames`);
+    }
   }
 
-  const report = renderQualityReport(spec, paths, probe, failures, warnings);
+  const report = renderQualityReport(spec, paths, probe, failures, warnings, voiceoverStatus);
   fs.writeFileSync(paths.qualityReport, report);
   console.log(`quality report: ${paths.qualityReport}`);
   if (failures.length > 0) {
@@ -323,8 +374,15 @@ function checkDemo(spec, paths) {
   }
 }
 
-function generateVoiceover(spec, paths, ffmpeg) {
+function generateVoiceover(spec, paths, ffmpeg, units = getRenderUnits(spec)) {
   const statusPath = path.join(paths.final, "voiceover-status.json");
+  const duration = totalDuration(spec);
+  if (fs.existsSync(paths.humanVoiceoverWav)) {
+    run(ffmpeg, ["-y", "-i", paths.humanVoiceoverWav, "-af", "apad", "-t", String(duration), "-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le", paths.voiceoverWav], "prepare human voiceover");
+    const status = { ok: true, voice: "human", source: paths.humanVoiceoverWav, segments: 1 };
+    fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
+    return status;
+  }
   if (process.platform !== "win32") {
     const status = { ok: false, reason: "Windows SAPI is only available on Windows" };
     fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
@@ -335,12 +393,12 @@ function generateVoiceover(spec, paths, ffmpeg) {
   fs.mkdirSync(segmentDir, { recursive: true });
   const voice = spec.voice?.preferred ?? "Microsoft Zira Desktop";
   const generated = [];
-  for (const [index, shot] of spec.shots.entries()) {
-    const textPath = path.join(segmentDir, `${String(index + 1).padStart(2, "0")}-${shot.id}.txt`);
-    const rawWav = path.join(segmentDir, `${String(index + 1).padStart(2, "0")}-${shot.id}-raw.wav`);
-    const paddedWav = path.join(segmentDir, `${String(index + 1).padStart(2, "0")}-${shot.id}.wav`);
-    const ps1 = path.join(segmentDir, `${String(index + 1).padStart(2, "0")}-${shot.id}.ps1`);
-    fs.writeFileSync(textPath, shot.voiceover);
+  for (const [index, unit] of units.entries()) {
+    const textPath = path.join(segmentDir, `${String(index + 1).padStart(2, "0")}-${unit.id}.txt`);
+    const rawWav = path.join(segmentDir, `${String(index + 1).padStart(2, "0")}-${unit.id}-raw.wav`);
+    const paddedWav = path.join(segmentDir, `${String(index + 1).padStart(2, "0")}-${unit.id}.wav`);
+    const ps1 = path.join(segmentDir, `${String(index + 1).padStart(2, "0")}-${unit.id}.ps1`);
+    fs.writeFileSync(textPath, unit.voiceover);
     fs.writeFileSync(ps1, `
 Add-Type -AssemblyName System.Speech
 $text = Get-Content -Raw -LiteralPath ${psQuote(textPath)}
@@ -358,7 +416,7 @@ $synth.Dispose()
       encoding: "utf8"
     });
     if (result.status !== 0 || !fs.existsSync(rawWav)) {
-      const status = { ok: false, reason: (result.stderr || result.stdout || `SAPI voiceover failed for ${shot.id}`).trim() };
+      const status = { ok: false, reason: (result.stderr || result.stdout || `SAPI voiceover failed for ${unit.id}`).trim() };
       fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
       return status;
     }
@@ -366,12 +424,12 @@ $synth.Dispose()
       "-y",
       "-i", rawWav,
       "-af", "apad",
-      "-t", String(shot.durationSeconds),
+      "-t", String(unit.durationSeconds),
       "-ar", "22050",
       "-ac", "1",
       "-c:a", "pcm_s16le",
       paddedWav
-    ], `pad voiceover segment ${shot.id}`);
+    ], `pad voiceover segment ${unit.id}`);
     generated.push(paddedWav);
   }
   const concatPath = path.join(segmentDir, "voiceover-clips.txt");
@@ -413,6 +471,7 @@ function renderCaptureReport(report) {
 }
 
 function renderPlan(spec, paths, audio) {
+  const units = getRenderUnits(spec);
   return `${[
     "# Demo Factory Render Plan",
     "",
@@ -422,21 +481,22 @@ function renderPlan(spec, paths, audio) {
     `Duration target: ${totalDuration(spec)} seconds`,
     `Audio: ${audio.ok ? `yes (${audio.voice})` : `no (${audio.reason})`}`,
     "",
-    "## Shots",
+    "## Render scenes",
     "",
-    ...spec.shots.flatMap((shot) => [
-      `- ${shot.id}: ${shot.durationSeconds}s`,
-      `  - screenshot: ${path.join(paths.screenshots, shot.screenshot)}`,
-      `  - caption: ${shot.caption}`
+    ...units.flatMap((unit) => [
+      `- ${unit.id}: ${unit.durationSeconds}s`,
+      `  - kind: ${unit.kind ?? "captured"}`,
+      `  - caption: ${unit.caption ?? "none"}`
     ])
   ].join("\n")}\n`;
 }
 
-function renderQualityReport(spec, paths, probe, failures, warnings) {
+function renderQualityReport(spec, paths, probe, failures, warnings, voiceoverStatus) {
   const duration = probe?.format?.duration ? Number(probe.format.duration).toFixed(2) : "unknown";
   const video = probe?.streams?.find((stream) => stream.codec_type === "video");
   const audio = probe?.streams?.find((stream) => stream.codec_type === "audio");
   const subtitles = probe?.streams?.filter((stream) => stream.codec_type === "subtitle") ?? [];
+  const distributionReady = failures.length === 0 && (!spec.voice?.requireHumanForFinal || voiceoverStatus?.voice === "human");
   return `${[
     "# Demo Factory Quality Report",
     "",
@@ -447,8 +507,14 @@ function renderQualityReport(spec, paths, probe, failures, warnings) {
     `Resolution: ${video ? `${video.width}x${video.height}` : "missing"}`,
     `Video stream: ${video ? "yes" : "no"}`,
     `Audio stream: ${audio ? "yes" : "no"}`,
-    `Subtitle streams: ${subtitles.length}`,
+    `Audio source: ${voiceoverStatus?.voice ?? "none"}`,
+    `Distribution ready: ${distributionReady ? "yes" : "no"}`,
+    `Subtitle streams: ${subtitles.length} (external SRT: ${fs.existsSync(paths.subtitles) ? "ready" : "missing"})`,
     `Preview frames: ${paths.previewFrames}`,
+    ...(spec.render?.mode === "designed" ? [
+      `Second-by-second contact sheet: ${paths.alignmentContactSheet}`,
+      `Transition contact sheet: ${paths.transitionContactSheet}`
+    ] : []),
     "",
     "## Required Evidence",
     "",
@@ -465,11 +531,13 @@ function renderQualityReport(spec, paths, probe, failures, warnings) {
 }
 
 function totalDuration(spec) {
-  return spec.shots.reduce((sum, shot) => sum + Number(shot.durationSeconds), 0);
+  return getRenderUnits(spec).reduce((sum, unit) => sum + Number(unit.durationSeconds), 0);
 }
 
 function previewTimes(duration) {
-  return [5, Math.floor(duration * 0.33), Math.floor(duration * 0.66), Math.max(1, duration - 5)];
+  return duration <= 45
+    ? [3, 8, 16, 25, 33, Math.max(1, duration - 2)]
+    : [5, Math.floor(duration * 0.33), Math.floor(duration * 0.66), Math.max(1, duration - 5)];
 }
 
 function findChrome() {
@@ -502,6 +570,11 @@ function run(command, args, label) {
 function readJsonIfExists(file) {
   if (!fs.existsSync(file)) return null;
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function countMatchingFiles(directory, pattern) {
+  if (!fs.existsSync(directory)) return 0;
+  return fs.readdirSync(directory).filter((name) => pattern.test(name)).length;
 }
 
 function escapeDrawtext(text) {
