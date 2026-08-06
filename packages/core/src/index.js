@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { evaluateScenarioTrace } from "./scenario-run.js";
 import { normalizeScenario } from "./scenario.js";
 export {
@@ -455,11 +456,12 @@ export function analyzeTracePair({ baseTrace, headTrace, scenario, executionProv
   const findings = [];
   const baseTools = baseTrace.tool_calls ?? [];
   const headTools = headTrace.tool_calls ?? [];
+  const stateDiff = buildStateMutationDiff(baseTrace, headTrace);
 
   findings.push(...compareToolSequence(baseTrace.scenario_id, baseTools, headTools));
   findings.push(...compareCodingAgentBehavior(baseTrace, headTrace));
   findings.push(...findConfirmationRegressions(headTrace.scenario_id, headTools));
-  findings.push(...compareState(baseTrace.scenario_id, baseTrace.state_after, headTrace.state_after));
+  findings.push(...compareStateMutations(baseTrace.scenario_id, stateDiff));
   findings.push(...compareCost(baseTrace.scenario_id, baseTrace, headTrace));
 
   const explainedFindings = findings.map(attachGenericFindingExplanation);
@@ -477,11 +479,52 @@ export function analyzeTracePair({ baseTrace, headTrace, scenario, executionProv
     scenario_result: scenarioResult,
     execution_provenance: executionProvenance ?? null,
     behavior_findings: explainedFindings,
+    state_diff: stateDiff,
     traces: {
       base: summarizeTrace(baseTrace),
       head: summarizeTrace(headTrace)
     },
     cost: summarizeCost(baseTrace, headTrace)
+  };
+}
+
+export function buildStateMutationDiff(baseTrace, headTrace, { limit = 100 } = {}) {
+  const maxEntries = Math.max(0, Math.floor(Number(limit) || 0));
+  const baseMutations = diffObjects(baseTrace?.state_before ?? {}, baseTrace?.state_after ?? {}).map(toStateMutation);
+  const headMutations = diffObjects(headTrace?.state_before ?? {}, headTrace?.state_after ?? {}).map(toStateMutation);
+  const baseByPath = new Map(baseMutations.map((mutation) => [mutation.path, mutation]));
+  const headByPath = new Map(headMutations.map((mutation) => [mutation.path, mutation]));
+  const addedMutations = headMutations.filter((mutation) => !baseByPath.has(mutation.path));
+  const removedMutations = baseMutations.filter((mutation) => !headByPath.has(mutation.path));
+  const changedMutations = headMutations
+    .filter((mutation) => baseByPath.has(mutation.path))
+    .map((mutation) => ({ path: mutation.path, base: baseByPath.get(mutation.path), head: mutation }))
+    .filter(({ base, head }) => !sameStateMutation(base, head));
+  const changes = [
+    ...addedMutations.map((mutation) => ({ kind: "added", mutation })),
+    ...changedMutations.map((mutation) => ({ kind: "changed", mutation })),
+    ...removedMutations.map((mutation) => ({ kind: "removed", mutation }))
+  ];
+  const consequentialMutationCount = changes.filter(({ kind, mutation }) => isConsequentialStateChange(kind, mutation)).length;
+  const topChanges = [...changes]
+    .sort((left, right) => Number(isConsequentialStateChange(right.kind, right.mutation)) - Number(isConsequentialStateChange(left.kind, left.mutation)))
+    .slice(0, Math.min(maxEntries, 8));
+  const lists = [baseMutations, headMutations, addedMutations, removedMutations, changedMutations];
+
+  return {
+    base_mutation_count: baseMutations.length,
+    head_mutation_count: headMutations.length,
+    added_mutation_count: addedMutations.length,
+    removed_mutation_count: removedMutations.length,
+    changed_mutation_count: changedMutations.length,
+    consequential_mutation_count: consequentialMutationCount,
+    base_mutations: baseMutations.slice(0, maxEntries),
+    head_mutations: headMutations.slice(0, maxEntries),
+    added_mutations: addedMutations.slice(0, maxEntries),
+    removed_mutations: removedMutations.slice(0, maxEntries),
+    changed_mutations: changedMutations.slice(0, maxEntries),
+    top_changes: topChanges,
+    truncated: lists.some((items) => items.length > maxEntries)
   };
 }
 
@@ -538,26 +581,25 @@ function findConfirmationRegressions(scenarioId, tools) {
     }));
 }
 
-function compareState(scenarioId, baseState, headState) {
-  const diffs = diffObjects(baseState ?? {}, headState ?? {});
-  const importantDiffs = diffs.filter((diff) => {
-    const path = diff.path.toLowerCase();
-    return path.includes("status") || path.includes("refund") || path.includes("amount") || path.includes("assignee");
-  });
+function compareStateMutations(scenarioId, stateDiff) {
+  const changed = stateDiff.top_changes;
+  if (changed.length === 0) return [];
 
-  if (importantDiffs.length === 0) {
-    return [];
-  }
+  const severity = stateDiff.consequential_mutation_count > 0 ? "high" : "medium";
 
   return [
     {
       scenario_id: scenarioId,
       finding_type: "state_diff",
-      severity: "high",
-      title: "Head changed important state differently than base",
-      reason: "The same scenario produced different durable state after execution.",
-      evidence: importantDiffs.slice(0, 5).map((diff) => `${diff.path}: base=${stableStringify(diff.base)} head=${stableStringify(diff.head)}`),
-      recommendation: "Review the state mutation. Add a deterministic expectation if this field must not change."
+      severity,
+      title: stateDiff.consequential_mutation_count > 0
+        ? "Head changed consequential state differently than base"
+        : "Head changed durable state differently than base",
+      reason: "The same scenario produced a different set of state mutations between its before and after snapshots.",
+      evidence: changed.slice(0, 8).map(formatStateMutationEvidence),
+      recommendation: stateDiff.consequential_mutation_count > 0
+        ? "Review the changed state boundary and add deterministic field expectations for values that require approval or must remain stable."
+        : "Review whether the changed state mutation is intended and add a deterministic field expectation when it is contractually important."
     }
   ];
 }
@@ -2479,12 +2521,54 @@ function diffObjects(base, head, prefix = "") {
       continue;
     }
 
-    if (stableStringify(baseValue) !== stableStringify(headValue)) {
+    if (!isDeepStrictEqual(baseValue, headValue)) {
       diffs.push({ path, base: baseValue, head: headValue });
     }
   }
 
   return diffs;
+}
+
+function toStateMutation(diff) {
+  return {
+    path: diff.path,
+    operation: diff.base === undefined ? "added" : diff.head === undefined ? "removed" : "changed",
+    before: diff.base,
+    after: diff.head
+  };
+}
+
+function sameStateMutation(base, head) {
+  return base.operation === head.operation &&
+    isDeepStrictEqual(base.before, head.before) &&
+    isDeepStrictEqual(base.after, head.after);
+}
+
+function isConsequentialStateChange(kind, item) {
+  const pathWords = String(item.path ?? "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[._[\]-]+/g, " ")
+    .toLowerCase();
+  if (/\b(status|stage|refund|amount|balance|charge|payment|invoice|assignee|owner|role|permission|access|memory|checkpoint|ticket|account)\b/.test(pathWords)) {
+    return true;
+  }
+  return kind === "removed" && /\b(review|confirm\w*|approval|validat\w*|policy|authoriz\w*|escalat\w*|human)\b/.test(pathWords);
+}
+
+function formatStateMutationEvidence({ kind, mutation }) {
+  if (kind === "changed") {
+    return `changed mutation ${mutation.path}: base ${formatStateTransition(mutation.base)}; head ${formatStateTransition(mutation.head)}`;
+  }
+  return `${kind} ${kind === "added" ? "head" : "base"} mutation ${mutation.path}: ${formatStateTransition(mutation)}`;
+}
+
+function formatStateTransition(mutation) {
+  return `${compactStateValue(mutation.before)} -> ${compactStateValue(mutation.after)}`;
+}
+
+function compactStateValue(value) {
+  const rendered = stableStringify(value);
+  return rendered.length > 160 ? `${rendered.slice(0, 157)}...` : rendered;
 }
 
 function isPlainObject(value) {

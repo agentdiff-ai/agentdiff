@@ -63,6 +63,8 @@ export function renderMarkdownReport(report) {
     lines.push("");
   });
 
+  renderStateDiff(lines, report.state_diff);
+
   lines.push("## trace summary");
   lines.push("");
   if (report.traces.base.agent_runtime || report.traces.head.agent_runtime) {
@@ -81,6 +83,36 @@ export function renderMarkdownReport(report) {
   lines.push("");
 
   return lines.join("\n");
+}
+
+function renderStateDiff(lines, stateDiff) {
+  if (!stateDiff || (
+    stateDiff.added_mutation_count === 0 &&
+    stateDiff.removed_mutation_count === 0 &&
+    stateDiff.changed_mutation_count === 0
+  )) return;
+
+  lines.push("## state mutation diff");
+  lines.push("");
+  lines.push(`base mutations: ${stateDiff.base_mutation_count}`);
+  lines.push(`head mutations: ${stateDiff.head_mutation_count}`);
+  lines.push(`new in head: ${stateDiff.added_mutation_count}`);
+  lines.push(`changed from base: ${stateDiff.changed_mutation_count}`);
+  lines.push(`missing from head: ${stateDiff.removed_mutation_count}`);
+  lines.push(`consequential changes: ${stateDiff.consequential_mutation_count}`);
+  if (stateDiff.truncated) lines.push("details: truncated; inspect report.json for the capped machine-readable diff");
+  lines.push("");
+
+  for (const mutation of stateDiff.added_mutations.slice(0, 5)) {
+    lines.push(`- added head mutation: ${mutation.path}`);
+  }
+  for (const mutation of stateDiff.changed_mutations.slice(0, 5)) {
+    lines.push(`- changed mutation: ${mutation.path}`);
+  }
+  for (const mutation of stateDiff.removed_mutations.slice(0, 5)) {
+    lines.push(`- missing base mutation: ${mutation.path}`);
+  }
+  lines.push("");
 }
 
 function renderScenarioResult(lines, result) {

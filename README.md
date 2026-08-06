@@ -143,7 +143,7 @@ This validates the end-to-end report UX in agentdiff's own PR flow. It does not 
 - Tool-calling agents.
 - LangGraph, Mastra, AI SDK-ish projects.
 - PR-time source diff classification.
-- Recorded normalized trace comparison.
+- Recorded normalized trace comparison, including base/head durable-state mutations.
 - Repo-aware reachability using relative imports, best-effort `tsconfig`/`jsconfig` aliases, workspace packages, and simple LangGraph config entrypoints.
 
 ## Not Yet
@@ -267,8 +267,6 @@ Experimental live adapters exist for Codex CLI, Claude Agent SDK, and OpenRouter
 
 ## Near-Term Roadmap
 
-1. Harness contract hardening.
-2. Base/head behavior runner.
-3. State fixture diff.
-4. Broader deterministic scenario templates beyond confirmation and must-not-call checks.
-5. More precise resolver support for complex TS/package layouts.
+1. Field-level state policy controls beyond exact-value expectations.
+2. Broader deterministic scenario templates beyond confirmation and must-not-call checks.
+3. More precise resolver support for complex TS/package layouts.
