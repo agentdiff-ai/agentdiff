@@ -50,7 +50,13 @@ try {
     encoding: "utf8"
   });
   assert.equal(initialized.status, 0, initialized.stderr);
+  assert.match(initialized.stdout, /agentdiff scan/);
+  assert.doesNotMatch(initialized.stdout, /node packages\/cli\/bin\/agentdiff\.js/);
   assert.ok(fs.existsSync(path.join(targetDir, ".github", "workflows", "agentdiff.yml")));
+  const installedConfig = fs.readFileSync(path.join(targetDir, "agentdiff.yml"), "utf8");
+  assert.doesNotMatch(installedConfig, /node packages\/cli\/bin\/agentdiff\.js/);
+  const installedWorkflow = fs.readFileSync(path.join(targetDir, ".github", "workflows", "agentdiff.yml"), "utf8");
+  assert.doesNotMatch(installedWorkflow, /node packages\/cli\/bin\/agentdiff\.js/);
 
   const demo = spawnSync(installedBin, ["demo", "--out", ".agentdiff/package-demo"], {
     ...(process.platform === "win32" ? { shell: true } : {}),

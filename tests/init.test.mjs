@@ -40,7 +40,8 @@ try {
   assert.match(first.stdout, /LangGraph graph entrypoints: src\/agents\/graph\.ts/);
   assert.match(first.stdout, /package\.json workspaces: packages\/\*/);
   assert.match(first.stdout, /tsconfig\.json path aliases: @\/\*, @repo\/\*/);
-  assert.match(first.stdout, /node packages\/cli\/bin\/agentdiff\.js scan/);
+  assert.match(first.stdout, /agentdiff scan/);
+  assert.doesNotMatch(first.stdout, /node packages\/cli\/bin\/agentdiff\.js/);
   assert.match(first.stdout, /rerun init with --github-action/);
 
   const config = fs.readFileSync(path.join(tempRoot, "agentdiff.yml"), "utf8");
@@ -50,9 +51,12 @@ try {
   assert.match(config, /Scan limits keep first runs fast/);
   assert.match(config, /Suppress intentional or noisy findings/);
   assert.match(config, /reason: "documentation examples"/);
-  assert.match(config, /expires: "2026-07-31"/);
+  const expiry = config.match(/expires: "(\d{4}-\d{2}-\d{2})"/)?.[1];
+  assert.ok(expiry, "starter suppressions should include a concrete expiry date");
+  assert.ok(new Date(`${expiry}T00:00:00Z`) > new Date(), "starter suppression expiry should be in the future");
   assert.match(config, /recorded:/);
   assert.match(config, /live_openrouter:/);
+  assert.doesNotMatch(config, /node packages\/cli\/bin\/agentdiff\.js/);
   assert.ok(fs.existsSync(path.join(tempRoot, ".agentdiff", "map.json")));
   assert.ok(fs.existsSync(path.join(tempRoot, ".agentdiff", "scenarios", "starter.json")));
   assert.ok(fs.existsSync(path.join(tempRoot, "agentdiff.policy.json")));
@@ -104,6 +108,7 @@ try {
   assert.match(workflow, /Recommended v0 channel/);
   assert.match(workflow, /Pin @v0\.1\.0 for an immutable exact version/);
   assert.match(workflow, /uses: agentdiff-ai\/agentdiff@v0/);
+  assert.doesNotMatch(workflow, /node packages\/cli\/bin\/agentdiff\.js/);
   assert.match(workflow, /command: plan/);
   assert.match(workflow, /base: origin\/\$\{\{ github\.base_ref \}\}/);
   assert.match(workflow, /head: HEAD/);

@@ -178,7 +178,7 @@ async function init({ force, githubAction }) {
   console.log("");
   console.log("next:");
   console.log("1. scan this repo:");
-  console.log("   node packages/cli/bin/agentdiff.js scan");
+  console.log("   agentdiff scan");
   console.log("2. review the generated map:");
   console.log("   .agentdiff/runs/latest/map.json");
   if (githubAction) {
@@ -1676,6 +1676,7 @@ function summarizeOnboardingSignals(signals) {
 
 function starterConfig(signals = { candidateDirs: [], langgraphEntryPoints: [] }) {
   const entrypoints = dedupe([...signals.langgraphEntryPoints, ...signals.candidateDirs.map((dir) => `${dir}/**`), "src/agents/**", "app/api/**"]);
+  const suppressionExpiry = futureDateString(90);
   return `agentdiff:
   entrypoints:
 ${entrypoints.map((entrypoint) => `    - ${entrypoint}`).join("\n")}
@@ -1699,25 +1700,29 @@ detection:
 # ignore:
 #   - path: "docs/**"
 #     reason: "documentation examples"
-#     expires: "2026-07-31"
+#     expires: "${suppressionExpiry}"
 #   - path: "tests/**"
 #     reason: "test fixtures"
-#     expires: "2026-07-31"
+#     expires: "${suppressionExpiry}"
 
 harnesses:
   recorded:
-    command: node packages/cli/bin/agentdiff.js run --example coding-agent-harness --recorded
+    command: agentdiff run --example coding-agent-harness --recorded
   live_openrouter:
     env:
       AGENTDIFF_HARNESS: openrouter-openai
       OPENROUTER_MODEL: xiaomi/mimo-v2.5-pro
       AGENTDIFF_MAX_LIVE_COST_USD: "0.25"
-    command: node packages/cli/bin/agentdiff.js run --example coding-agent-harness --live
+    command: agentdiff run --example coding-agent-harness --live
 
 report:
   comment_on_pr: true
   upload_artifacts: true
 `;
+}
+
+function futureDateString(days) {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function starterGitHubWorkflow() {
@@ -1740,7 +1745,7 @@ jobs:
 
       # Recommended v0 channel. Pin @v0.1.0 for an immutable exact version.
       # For local development inside this repo, the equivalent command is:
-      # node packages/cli/bin/agentdiff.js plan --base origin/\${{ github.base_ref }} --head HEAD
+      # agentdiff plan --base origin/\${{ github.base_ref }} --head HEAD
       - uses: agentdiff-ai/agentdiff@v0
         with:
           command: plan
