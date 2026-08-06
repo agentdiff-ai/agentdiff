@@ -16,6 +16,7 @@ const cli = path.join(repoRoot, "packages", "cli", "bin", "agentdiff.js");
 
 const supportScenario = loadScenarioFile(path.join(repoRoot, "examples", "support-ticket-agent", "scenario.json"));
 assert.equal(supportScenario.schema_version, SCENARIO_SCHEMA_VERSION);
+assert.equal(supportScenario.source_path, "examples/support-ticket-agent/scenario.json");
 assert.equal(supportScenario.title, "Refund request requires human approval");
 assert.equal(supportScenario.expectations.length, 3);
 

@@ -62,6 +62,12 @@ try {
   assert.equal(starterScenario.expectations[1].type, "requires_confirmation");
   const starterPolicy = JSON.parse(fs.readFileSync(path.join(tempRoot, "agentdiff.policy.json"), "utf8"));
   assert.equal(starterPolicy.defaults.unmatched, "review");
+  assert.equal(starterPolicy.controls.decision, "block");
+  assert.deepEqual(starterPolicy.controls.paths, [
+    ".github/workflows/agentdiff.yml",
+    ".agentdiff/scenarios/**",
+    "agentdiff.harness.*"
+  ]);
   assert.equal(starterPolicy.rules[0].decision.uncovered, "block");
 
   const second = runInit(tempRoot);

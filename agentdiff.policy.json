@@ -3,6 +3,14 @@
   "defaults": {
     "unmatched": "review"
   },
+  "controls": {
+    "decision": "block",
+    "paths": [
+      ".github/workflows/agentdiff.yml",
+      "examples/support-ticket-agent/scenario.json",
+      "examples/demo-support-agent/harness.js"
+    ]
+  },
   "rules": [
     {
       "id": "demo-refunds-require-approval",

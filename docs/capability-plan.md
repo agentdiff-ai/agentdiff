@@ -27,6 +27,14 @@ The command always writes `report.json` and `report.md`. A `block` decision exit
   "defaults": {
     "unmatched": "review"
   },
+  "controls": {
+    "decision": "block",
+    "paths": [
+      ".github/workflows/agentdiff.yml",
+      ".agentdiff/scenarios/**",
+      "agentdiff.harness.*"
+    ]
+  },
   "rules": [
     {
       "id": "refunds-require-approval",
@@ -54,11 +62,17 @@ The command always writes `report.json` and `report.md`. A `block` decision exit
 
 `capability` and optional `path` support `*`, `**`, and `?` globs. Rules are evaluated in file order; the first matching rule wins.
 
+## Review control integrity
+
+The policy file, every loaded scenario, and repository-local scenario and harness artifacts used by run evidence are protected automatically. `controls.paths` adds repository-specific controls such as the Agentdiff workflow. If the planned diff changes one of these files, the report includes a `changed_review_control` entry and blocks. `controls.decision` must be `block`; a head policy cannot relax the rule that protects its own changes.
+
+This prevents a pull request from satisfying its own policy by weakening the policy, scenario, harness, or configured workflow used to judge that same pull request. Review and merge control changes separately. Branch protection must still require the Agentdiff check; a workflow cannot defend itself after it has been disabled outside the check.
+
 ## Decisions
 
 - `allow`: no consequential capability or guardrail change requires review, or an explicit rule allows a covered capability.
 - `review`: a capability is policy-covered but still deserves human review, an unmatched capability uses the default review decision, or a guardrail was removed.
-- `block`: a matching rule is missing a required scenario or confirmation expectation, or required run evidence is missing, failing, stale, produced by an unapproved harness, or backed by altered artifacts.
+- `block`: a matching rule is missing a required scenario or confirmation expectation, required run evidence is missing, failing, stale, produced by an unapproved harness, or backed by altered artifacts, or the pull request changes a protected review control.
 
 Overall precedence is `block`, then `review`, then `allow`.
 

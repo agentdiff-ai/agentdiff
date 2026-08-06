@@ -20,15 +20,16 @@ jobs:
 
       - name: Evaluate refund approval scenario
         continue-on-error: true
-        run: >-
-          node packages/cli/bin/agentdiff.js run
-          --base-ref origin/${{ github.base_ref || 'main' }}
-          --head-ref HEAD
-          --harness-module examples/demo-support-agent/harness.js
-          --scenario examples/support-ticket-agent/scenario.json
-          --out .agentdiff/runs/evidence/refund-approval
+        uses: agentdiff-ai/agentdiff@v0
+        with:
+          command: run
+          base-ref: origin/${{ github.base_ref || 'main' }}
+          head-ref: HEAD
+          harness-module: examples/demo-support-agent/harness.js
+          scenario: examples/support-ticket-agent/scenario.json
+          out: .agentdiff/runs/evidence/refund-approval
 
-      - uses: ./
+      - uses: agentdiff-ai/agentdiff@v0
         with:
           command: plan
           base: origin/${{ github.base_ref || 'main' }}
@@ -56,7 +57,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./
+      - uses: agentdiff-ai/agentdiff@v0
         with:
           command: run
           example: coding-agent-harness

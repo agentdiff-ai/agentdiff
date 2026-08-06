@@ -34,6 +34,7 @@ function executionProvenance(overrides = {}) {
 const classificationReport = {
   repo: "refund-agent",
   status: "action_required",
+  changed_files: ["src/supportAgent.js"],
   changed_surfaces: [{ path: "src/supportAgent.js" }],
   diff_aware_findings: [
     {
@@ -195,6 +196,98 @@ const unverifiedArtifacts = buildCapabilityPlan({
 assert.equal(unverifiedArtifacts.decision, "block");
 assert.deepEqual(unverifiedArtifacts.capability_changes[0].coverage.unverified_artifact_scenarios, ["refund_requires_human_approval"]);
 
+const changedPolicyControl = buildCapabilityPlan({
+  classificationReport: {
+    ...classificationReport,
+    changed_files: ["agentdiff.policy.json"],
+    changed_surfaces: [{ path: "agentdiff.policy.json" }],
+    diff_aware_findings: []
+  },
+  policy,
+  scenarios: [scenario],
+  policySource: "agentdiff.policy.json"
+});
+assert.equal(changedPolicyControl.decision, "block");
+assert.equal(changedPolicyControl.summary.changed_review_controls, 1);
+assert.equal(changedPolicyControl.summary.removed_guardrails, 0);
+assert.equal(changedPolicyControl.control_changes[0].control, "policy");
+
+const changedScenarioControl = buildCapabilityPlan({
+  classificationReport: {
+    ...classificationReport,
+    changed_files: [scenario.source_path],
+    changed_surfaces: [{ path: scenario.source_path }]
+  },
+  policy,
+  scenarios: [scenario],
+  runReports: [passingRunReport],
+  expectedRevision,
+  policySource: "refund-policy.json"
+});
+assert.equal(changedScenarioControl.decision, "block");
+assert.equal(changedScenarioControl.summary.changed_review_controls, 1);
+assert.equal(changedScenarioControl.summary.removed_guardrails, 1);
+assert.equal(changedScenarioControl.control_changes.at(-1).control, "scenario");
+
+const harnessRunReport = {
+  ...passingRunReport,
+  execution_provenance: executionProvenance({
+    artifacts: {
+      harness_module: {
+        path: ".agentdiff/harness.js",
+        repository_local: true,
+        sha256: "fixture"
+      }
+    }
+  })
+};
+const changedHarnessControl = buildCapabilityPlan({
+  classificationReport: {
+    ...classificationReport,
+    changed_files: [".agentdiff/harness.js"],
+    changed_surfaces: [{ path: ".agentdiff/harness.js" }],
+    diff_aware_findings: []
+  },
+  policy,
+  scenarios: [scenario],
+  runReports: [harnessRunReport]
+});
+assert.equal(changedHarnessControl.decision, "block");
+assert.equal(changedHarnessControl.control_changes[0].control, "harness");
+
+const configuredControlPolicy = {
+  ...policy,
+  controls: {
+    decision: "block",
+    paths: [".github/workflows/agentdiff*.yml"]
+  }
+};
+const changedConfiguredControl = buildCapabilityPlan({
+  classificationReport: {
+    ...classificationReport,
+    changed_files: [".github/workflows/agentdiff.yml"],
+    changed_surfaces: [{ path: ".github/workflows/agentdiff.yml" }],
+    diff_aware_findings: []
+  },
+  policy: configuredControlPolicy,
+  scenarios: []
+});
+assert.equal(changedConfiguredControl.decision, "block");
+assert.equal(changedConfiguredControl.control_changes[0].control, "configured");
+
+const unrelatedChange = buildCapabilityPlan({
+  classificationReport: {
+    ...classificationReport,
+    changed_files: ["docs/architecture.md"],
+    changed_surfaces: [{ path: "docs/architecture.md" }],
+    diff_aware_findings: []
+  },
+  policy: configuredControlPolicy,
+  scenarios: []
+});
+assert.equal(unrelatedChange.decision, "allow");
+assert.equal(unrelatedChange.summary.changed_review_controls, 0);
+
 const noChanges = buildCapabilityPlan({
   classificationReport: { ...classificationReport, diff_aware_findings: [] },
   policy,
@@ -218,6 +311,14 @@ assert.throws(
   }),
   /needs at least one required scenario/
 );
+assert.throws(
+  () => normalizeCapabilityPolicy({ version: "0.1", controls: { decision: "review", paths: ["controls/**"] }, rules: [] }),
+  /controls\.decision must be block/
+);
+assert.throws(
+  () => normalizeCapabilityPolicy({ version: "0.1", controls: { decision: "block", paths: [""] }, rules: [] }),
+  CapabilityPolicyValidationError
+);
 
 const markdown = renderMarkdownReport(uncovered);
 assert.match(markdown, /decision: \*\*BLOCK\*\*/);
@@ -227,6 +328,10 @@ assert.match(markdown, /missing: refund_requires_human_approval/);
 assert.match(markdown, /Removed guardrail: escalateRefund/);
 assert.ok(markdown.indexOf("## Block (1)") < markdown.indexOf("## Review (2)"));
 assert.match(markdown, /not a vulnerability claim/);
+const controlMarkdown = renderMarkdownReport(changedScenarioControl);
+assert.match(controlMarkdown, /changed review controls: 1/);
+assert.match(controlMarkdown, /Changed review control:/);
+assert.match(controlMarkdown, /control type: scenario/);
 
 const missingDiffInput = spawnSync(process.execPath, [cli, "plan"], { encoding: "utf8" });
 assert.equal(missingDiffInput.status, 1);
@@ -318,6 +423,30 @@ try {
   assert.equal(actionRun.status, 0, actionRun.stderr);
   assert.match(actionRun.stdout, /agentdiff action: .* plan/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(tempRoot, ".agentdiff", "action-plan", "report.json"), "utf8")).decision, "review");
+
+  execFileSync("git", ["add", "agentdiff.policy.json", ".agentdiff/scenarios/refund.json", ".agentdiff/harness.js"], { cwd: tempRoot });
+  execFileSync("git", ["commit", "-m", "add review controls"], { cwd: tempRoot, stdio: "ignore" });
+  const controlBase = execFileSync("git", ["rev-parse", "HEAD"], { cwd: tempRoot, encoding: "utf8" }).trim();
+  const scenarioPath = path.join(tempRoot, ".agentdiff", "scenarios", "refund.json");
+  const changedScenario = JSON.parse(fs.readFileSync(scenarioPath, "utf8"));
+  changedScenario.title = "Weakened approval scenario";
+  fs.writeFileSync(scenarioPath, `${JSON.stringify(changedScenario, null, 2)}\n`);
+  execFileSync("git", ["add", ".agentdiff/scenarios/refund.json"], { cwd: tempRoot });
+  execFileSync("git", ["commit", "-m", "change review scenario"], { cwd: tempRoot, stdio: "ignore" });
+  const controlHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: tempRoot, encoding: "utf8" }).trim();
+  const changedControl = spawnSync(process.execPath, [
+    cli,
+    "plan",
+    "--base", controlBase,
+    "--head", controlHead,
+    "--run-reports", ".agentdiff/evidence",
+    "--out", ".agentdiff/control-change-plan"
+  ], { cwd: tempRoot, encoding: "utf8" });
+  assert.equal(changedControl.status, 1, changedControl.stderr);
+  const changedControlReport = JSON.parse(fs.readFileSync(path.join(tempRoot, ".agentdiff", "control-change-plan", "report.json"), "utf8"));
+  assert.equal(changedControlReport.decision, "block");
+  assert.equal(changedControlReport.summary.changed_review_controls, 1);
+  assert.equal(changedControlReport.control_changes[0].kind, "changed_review_control");
 
   fs.rmSync(path.join(tempRoot, ".agentdiff", "scenarios"), { recursive: true, force: true });
   const blocked = spawnSync(process.execPath, [cli, "plan", "--base", base, "--head", head, "--out", ".agentdiff/blocked"], {

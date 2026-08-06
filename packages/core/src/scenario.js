@@ -32,7 +32,11 @@ export function loadScenarioFile(filePath) {
   } catch (error) {
     throw new ScenarioValidationError(filePath, [`could not read valid JSON: ${error.message}`]);
   }
-  return normalizeScenario(parsed, { source: filePath });
+  const scenario = normalizeScenario(parsed, { source: filePath });
+  return {
+    ...scenario,
+    source_path: path.relative(process.cwd(), absolutePath).replaceAll("\\", "/")
+  };
 }
 
 export function normalizeScenario(value, { source = "scenario" } = {}) {

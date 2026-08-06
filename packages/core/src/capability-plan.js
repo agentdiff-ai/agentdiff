@@ -24,6 +24,14 @@ export function normalizeCapabilityPolicy(value, { source = "capability policy" 
   const unmatched = isPlainObject(value.defaults) ? value.defaults.unmatched ?? "review" : "review";
   validateDecision(unmatched, "defaults.unmatched", errors);
 
+  if (value.controls !== undefined && !isPlainObject(value.controls)) errors.push("controls must be an object");
+  const controlDecision = isPlainObject(value.controls) ? value.controls.decision ?? "block" : "block";
+  const controlPaths = isPlainObject(value.controls) ? value.controls.paths ?? [] : [];
+  if (controlDecision !== "block") errors.push("controls.decision must be block");
+  if (!Array.isArray(controlPaths) || controlPaths.some((item) => !isNonEmptyString(item))) {
+    errors.push("controls.paths must be an array of non-empty strings");
+  }
+
   if (value.rules !== undefined && !Array.isArray(value.rules)) errors.push("rules must be an array");
   const seenIds = new Set();
   const rules = (Array.isArray(value.rules) ? value.rules : []).map((rule, index) => {
@@ -79,6 +87,10 @@ export function normalizeCapabilityPolicy(value, { source = "capability policy" 
   return {
     version: CAPABILITY_POLICY_VERSION,
     defaults: { unmatched },
+    controls: {
+      decision: controlDecision,
+      paths: Array.isArray(controlPaths) ? [...new Set(controlPaths.map((item) => item.trim()))] : []
+    },
     rules
   };
 }
@@ -140,6 +152,14 @@ export function buildCapabilityPlan({
     }
   }
 
+  controlChanges.push(...buildProtectedControlChanges({
+    classificationReport,
+    policy: normalizedPolicy,
+    policySource,
+    scenarios,
+    runReports
+  }));
+
   const decisions = [...capabilityChanges.map((change) => change.decision), ...controlChanges.map((change) => change.decision)];
   const decision = highestDecision(decisions);
   const counts = countDecisions(decisions);
@@ -158,7 +178,9 @@ export function buildCapabilityPlan({
     policy: {
       source: policySource,
       version: normalizedPolicy.version,
-      rules: normalizedPolicy.rules.length
+      rules: normalizedPolicy.rules.length,
+      control_decision: normalizedPolicy.controls.decision,
+      configured_control_paths: normalizedPolicy.controls.paths.length
     },
     execution_context: {
       expected_revision: expectedRevision
@@ -166,7 +188,8 @@ export function buildCapabilityPlan({
     warnings: unique(warnings),
     summary: {
       added_capabilities: capabilityChanges.length,
-      removed_guardrails: controlChanges.length,
+      removed_guardrails: controlChanges.filter((change) => change.kind === "removed_guardrail_call").length,
+      changed_review_controls: controlChanges.filter((change) => change.kind === "changed_review_control").length,
       covered,
       declared_covered: declaredCovered,
       execution_covered: executionCovered,
@@ -190,6 +213,47 @@ export function buildCapabilityPlan({
       actual_cost_usd: 0
     }
   };
+}
+
+function buildProtectedControlChanges({ classificationReport, policy, policySource, scenarios, runReports }) {
+  const protectedControls = [];
+  addProtectedControl(protectedControls, policySource, "policy", false);
+  for (const scenario of scenarios) addProtectedControl(protectedControls, scenario.source_path, "scenario", false);
+  for (const report of runReports) {
+    const artifacts = report.execution_provenance?.artifacts ?? {};
+    if (artifacts.scenario?.repository_local !== false) addProtectedControl(protectedControls, artifacts.scenario?.path, "scenario", false);
+    if (artifacts.harness_module?.repository_local !== false) addProtectedControl(protectedControls, artifacts.harness_module?.path, "harness", false);
+  }
+  for (const pattern of policy.controls.paths) addProtectedControl(protectedControls, pattern, "configured", true);
+
+  const changedFiles = unique([
+    ...(classificationReport.changed_files ?? []),
+    ...(classificationReport.changed_surfaces ?? []).map((surface) => surface.path)
+  ].map(normalizeRepositoryPath).filter(Boolean));
+
+  return changedFiles.flatMap((filePath) => {
+    const matches = protectedControls.filter((control) =>
+      control.glob ? matchesGlob(control.pattern, filePath) : control.pattern.toLowerCase() === filePath.toLowerCase()
+    );
+    if (matches.length === 0) return [];
+    return [{
+      control: unique(matches.map((match) => match.type)).join(", "),
+      kind: "changed_review_control",
+      path: filePath,
+      matched_patterns: unique(matches.map((match) => match.pattern)),
+      decision: policy.controls.decision,
+      reason: "This pull request changes a policy, scenario, harness, or configured control used to evaluate the same change.",
+      evidence: unique(matches.map((match) => `${match.type} control matched: ${match.pattern}`))
+    }];
+  });
+}
+
+function addProtectedControl(controls, value, type, glob) {
+  const pattern = normalizeRepositoryPath(value);
+  if (!pattern || pattern === ".." || pattern.startsWith("../")) return;
+  const key = `${type}:${glob ? "glob" : "exact"}:${pattern.toLowerCase()}`;
+  if (controls.some((control) => control.key === key)) return;
+  controls.push({ key, pattern, type, glob });
 }
 
 function evaluateCoverage(rule, capability, scenarioById, runReports, expectedRevision) {
@@ -410,6 +474,10 @@ function isPlainObject(value) {
 
 function normalizePath(value) {
   return String(value ?? "").replaceAll("\\", "/");
+}
+
+function normalizeRepositoryPath(value) {
+  return normalizePath(value).replace(/^\.\//, "");
 }
 
 function unique(values) {

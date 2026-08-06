@@ -95,12 +95,18 @@ function renderScenarioResult(lines, result) {
 
 function renderCapabilityPlan(report) {
   const lines = [];
-  const blocked = report.capability_changes.filter((change) => change.decision === "block");
+  const blocked = [
+    ...report.capability_changes.filter((change) => change.decision === "block"),
+    ...report.control_changes.filter((change) => change.decision === "block")
+  ];
   const review = [
     ...report.capability_changes.filter((change) => change.decision === "review"),
     ...report.control_changes.filter((change) => change.decision === "review")
   ];
-  const allowed = report.capability_changes.filter((change) => change.decision === "allow");
+  const allowed = [
+    ...report.capability_changes.filter((change) => change.decision === "allow"),
+    ...report.control_changes.filter((change) => change.decision === "allow")
+  ];
 
   lines.push("# agentdiff capability plan");
   lines.push("");
@@ -108,6 +114,7 @@ function renderCapabilityPlan(report) {
   lines.push(`policy: ${report.policy.source} (v${report.policy.version})`);
   lines.push(`added capabilities: ${report.summary.added_capabilities}`);
   lines.push(`removed guardrails: ${report.summary.removed_guardrails}`);
+  lines.push(`changed review controls: ${report.summary.changed_review_controls ?? 0}`);
   lines.push(`declared scenario coverage: ${report.summary.declared_covered}`);
   lines.push(`passing run coverage: ${report.summary.execution_covered}`);
   lines.push(`provenance coverage: ${report.summary.provenance_covered}`);
@@ -135,7 +142,7 @@ function renderCapabilityPlan(report) {
     lines.push("<details>");
     lines.push(`<summary>Allowed (${allowed.length})</summary>`);
     lines.push("");
-    for (const change of allowed) renderCapabilityChange(lines, change);
+    for (const change of allowed) renderPlanChange(lines, change);
     lines.push("</details>");
     lines.push("");
   }
@@ -160,9 +167,13 @@ function renderCapabilityGroup(lines, title, changes) {
     return;
   }
   for (const change of changes) {
-    if (change.kind === "removed_guardrail_call") renderControlChange(lines, change);
-    else renderCapabilityChange(lines, change);
+    renderPlanChange(lines, change);
   }
+}
+
+function renderPlanChange(lines, change) {
+  if (["removed_guardrail_call", "changed_review_control"].includes(change.kind)) renderControlChange(lines, change);
+  else renderCapabilityChange(lines, change);
 }
 
 function renderCapabilityChange(lines, change) {
@@ -220,9 +231,12 @@ function shortRevision(value) {
 }
 
 function renderControlChange(lines, change) {
-  lines.push(`### Removed guardrail: ${change.guardrail}`);
+  if (change.kind === "changed_review_control") lines.push(`### Changed review control: ${change.path}`);
+  else lines.push(`### Removed guardrail: ${change.guardrail}`);
   lines.push("");
   lines.push(`file: ${change.path}`);
+  if (change.control) lines.push(`control type: ${change.control}`);
+  if ((change.matched_patterns ?? []).length > 0) lines.push(`matched control: ${change.matched_patterns.join(", ")}`);
   lines.push(`decision: ${change.decision}`);
   lines.push(`reason: ${change.reason}`);
   lines.push("");

@@ -287,6 +287,7 @@ export function buildClassificationReport({ files, repo = process.cwd(), suppres
     repo,
     mode: "classify",
     status,
+    changed_files: unique(files.map((file) => normalizePath(file.filePath))),
     changed_surfaces: changedSurfaces,
     diff_aware_findings: activeDiffAwareFindings,
     map_drift: activeMapDrift,

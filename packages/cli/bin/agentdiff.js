@@ -431,6 +431,7 @@ async function plan({ files, out, policyPath, scenariosPath, runReportsPath, exp
   console.log(`agentdiff plan: ${report.decision}`);
   console.log(`added capabilities: ${report.summary.added_capabilities}`);
   console.log(`removed guardrails: ${report.summary.removed_guardrails}`);
+  console.log(`changed review controls: ${report.summary.changed_review_controls}`);
   console.log(`covered capabilities: ${report.summary.covered}`);
   console.log(`declared-covered capabilities: ${report.summary.declared_covered}`);
   console.log(`execution-covered capabilities: ${report.summary.execution_covered}`);
@@ -1725,6 +1726,14 @@ function starterCapabilityPolicy() {
     version: "0.1",
     defaults: {
       unmatched: "review"
+    },
+    controls: {
+      decision: "block",
+      paths: [
+        ".github/workflows/agentdiff.yml",
+        ".agentdiff/scenarios/**",
+        "agentdiff.harness.*"
+      ]
     },
     rules: [
       {

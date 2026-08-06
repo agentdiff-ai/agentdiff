@@ -72,6 +72,7 @@ function highRiskCallsFor({ filePath, addedLines }) {
       }
     ]
   });
+  assert.deepEqual(report.changed_files, [filePath]);
 
   return report.diff_aware_findings.flatMap((finding) => finding.added_high_risk_calls ?? []);
 }
