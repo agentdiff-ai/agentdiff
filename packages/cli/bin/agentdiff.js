@@ -1691,7 +1691,7 @@ on:
     branches: [main]
 
 jobs:
-  classify:
+  plan:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1700,14 +1700,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm install
 
       # Recommended v0 channel. Pin @v0.1.0 for an immutable exact version.
       # For local development inside this repo, the equivalent command is:

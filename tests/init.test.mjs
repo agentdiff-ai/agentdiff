@@ -99,8 +99,8 @@ try {
   assert.match(workflow, /contents: read/);
   assert.match(workflow, /pull-requests: write/);
   assert.match(workflow, /actions\/checkout@v4/);
-  assert.match(workflow, /actions\/setup-node@v4/);
-  assert.match(workflow, /run: npm install/);
+  assert.doesNotMatch(workflow, /actions\/setup-node/);
+  assert.doesNotMatch(workflow, /npm (?:install|ci)/);
   assert.match(workflow, /Recommended v0 channel/);
   assert.match(workflow, /Pin @v0\.1\.0 for an immutable exact version/);
   assert.match(workflow, /uses: agentdiff-ai\/agentdiff@v0/);
