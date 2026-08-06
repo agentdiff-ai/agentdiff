@@ -103,6 +103,8 @@ export async function runScenario({ scenario, cwd }) {
 
 When scenario expectations fail, `run` writes its report and exits nonzero. CI can use `continue-on-error: true` for that evidence step, then let `plan --run-reports .agentdiff/runs/evidence` produce the final policy decision and sticky comment.
 
+Upload `.agentdiff/runs` as a CI artifact when reviewers need the generated trace and evidence report behind the plan. Uploading only `.agentdiff/runs/latest` omits the underlying scenario evidence.
+
 Evidence aggregation is conservative: every eligible supplied result for a required scenario must be structurally valid and pass. Conflicting pass/fail results or malformed result summaries do not satisfy policy coverage.
 
 `run` records the current Git revision, tracked-worktree cleanliness, a stable harness ID, and SHA-256 hashes for the base trace, head trace, scenario, and harness module when used. When policy enables `current_revision`, `artifacts`, or `harnesses`, `plan` only accepts evidence from a clean tracked worktree for the planned head revision, from an approved harness, whose repository-local artifacts still match the recorded hashes.
