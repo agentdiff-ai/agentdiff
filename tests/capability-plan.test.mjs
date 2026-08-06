@@ -320,6 +320,21 @@ assert.throws(
   CapabilityPolicyValidationError
 );
 
+const normalizedWithoutOptionalPath = normalizeCapabilityPolicy({
+  version: "0.1",
+  defaults: { unmatched: "review" },
+  rules: [
+    {
+      id: "starter-rule",
+      capability: "replace_with_high_risk_tool",
+      reason: "Requires review.",
+      require: { scenarios: ["starter_scenario"], confirmation: true },
+      decision: { covered: "review", uncovered: "block" }
+    }
+  ]
+});
+assert.deepEqual(normalizeCapabilityPolicy(normalizedWithoutOptionalPath), normalizedWithoutOptionalPath);
+
 const markdown = renderMarkdownReport(uncovered);
 assert.match(markdown, /decision: \*\*BLOCK\*\*/);
 assert.match(markdown, /policy: refund-policy\.json \(v0\.1\)/);

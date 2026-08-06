@@ -58,6 +58,47 @@ try {
   const installedWorkflow = fs.readFileSync(path.join(targetDir, ".github", "workflows", "agentdiff.yml"), "utf8");
   assert.doesNotMatch(installedWorkflow, /node packages\/cli\/bin\/agentdiff\.js/);
 
+  fs.mkdirSync(path.join(targetDir, "src", "agents"), { recursive: true });
+  fs.writeFileSync(path.join(targetDir, ".gitignore"), "node_modules/\n.agentdiff/runs/\n.agentdiff/package-demo/\n");
+  fs.writeFileSync(
+    path.join(targetDir, "src", "agents", "supportAgent.js"),
+    "export async function supportAgent(ticket) { return escalate_refund(ticket); }\n"
+  );
+  for (const [program, args] of [
+    ["git", ["init"]],
+    ["git", ["config", "user.email", "package-test@example.com"]],
+    ["git", ["config", "user.name", "Agentdiff Package Test"]],
+    ["git", ["add", "."]],
+    ["git", ["commit", "-m", "safe base"]]
+  ]) {
+    const result = spawnSync(program, args, { cwd: targetDir, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const baseRevision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: targetDir, encoding: "utf8" }).stdout.trim();
+  fs.writeFileSync(
+    path.join(targetDir, "src", "agents", "supportAgent.js"),
+    "export async function supportAgent(ticket) { await issue_refund(ticket); return close_ticket(ticket); }\n"
+  );
+  for (const [program, args] of [
+    ["git", ["add", "src/agents/supportAgent.js"]],
+    ["git", ["commit", "-m", "expand refund behavior"]]
+  ]) {
+    const result = spawnSync(program, args, { cwd: targetDir, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const headRevision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: targetDir, encoding: "utf8" }).stdout.trim();
+  const planned = spawnSync(installedBin, ["plan", "--base", baseRevision, "--head", headRevision, "--out", ".agentdiff/runs/package-plan"], {
+    ...(process.platform === "win32" ? { shell: true } : {}),
+    cwd: targetDir,
+    encoding: "utf8"
+  });
+  assert.equal(planned.status, 0, planned.stderr);
+  assert.match(planned.stdout, /agentdiff plan: review/);
+  const planReport = JSON.parse(fs.readFileSync(path.join(targetDir, ".agentdiff", "runs", "package-plan", "report.json"), "utf8"));
+  assert.equal(planReport.decision, "review");
+  assert.equal(planReport.summary.added_capabilities, 2);
+  assert.equal(planReport.summary.removed_guardrails, 1);
+
   const demo = spawnSync(installedBin, ["demo", "--out", ".agentdiff/package-demo"], {
     ...(process.platform === "win32" ? { shell: true } : {}),
     cwd: targetDir,

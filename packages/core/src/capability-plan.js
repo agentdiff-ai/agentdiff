@@ -71,7 +71,7 @@ export function normalizeCapabilityPolicy(value, { source = "capability policy" 
     return {
       id,
       capability,
-      path: isNonEmptyString(rule.path) ? rule.path.trim() : null,
+      ...(isNonEmptyString(rule.path) ? { path: rule.path.trim() } : {}),
       reason,
       require: {
         scenarios: Array.isArray(requiredScenarios) ? [...new Set(requiredScenarios.map((item) => item.trim()))] : [],
