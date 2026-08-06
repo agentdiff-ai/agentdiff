@@ -435,10 +435,12 @@ function generateVoiceover(spec, paths, ffmpeg, units = getRenderUnits(spec)) {
         throw new Error(`Human segment ${path.basename(file)} is ${inputDuration.toFixed(2)}s but scene ${unit.id} allows ${unit.durationSeconds}s`);
       }
       const output = path.join(preparedDir, `${unit.id}.wav`);
-      run(ffmpeg, ["-y", "-i", file, "-af", "apad", "-t", String(unit.durationSeconds), "-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le", output], `prepare human segment ${unit.id}`);
+      run(ffmpeg, ["-y", "-i", file, "-af", "apad", "-t", String(unit.durationSeconds), "-ar", String(humanSampleRate(spec)), "-ac", "1", "-c:a", "pcm_s24le", output], `prepare human segment ${unit.id}`);
       return output;
     });
-    concatVoiceoverSegments(prepared, preparedDir, paths.voiceoverWav, ffmpeg);
+    const rawMix = path.join(preparedDir, "voiceover-human-raw.wav");
+    concatVoiceoverSegments(prepared, preparedDir, rawMix, ffmpeg);
+    masterHumanVoiceover(spec, rawMix, paths.voiceoverWav, duration, ffmpeg);
     const status = { ok: true, voice: "human", sourceType: "human_segments", source: paths.humanVoiceoverSegments, segments: prepared.length };
     fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
     return status;
@@ -448,7 +450,7 @@ function generateVoiceover(spec, paths, ffmpeg, units = getRenderUnits(spec)) {
     if (Math.abs(inputDuration - duration) > 0.5) {
       throw new Error(`Human voiceover mix is ${inputDuration.toFixed(2)}s; expected ${duration.toFixed(2)}s (+/- 0.5s). Use the per-scene recording guide to avoid timing drift.`);
     }
-    run(ffmpeg, ["-y", "-i", paths.humanVoiceoverWav, "-af", "apad", "-t", String(duration), "-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le", paths.voiceoverWav], "prepare human voiceover");
+    masterHumanVoiceover(spec, paths.humanVoiceoverWav, paths.voiceoverWav, duration, ffmpeg);
     const status = { ok: true, voice: "human", sourceType: "human_mix", source: paths.humanVoiceoverWav, inputDuration, segments: 1 };
     fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
     return status;
@@ -506,6 +508,27 @@ $synth.Dispose()
   const status = { ok: true, voice, sourceType: "synthetic_placeholder", segments: generated.length };
   fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
   return status;
+}
+
+function humanSampleRate(spec) {
+  return Number(spec.voice?.sampleRate ?? 48000);
+}
+
+function masterHumanVoiceover(spec, input, output, duration, ffmpeg) {
+  const highpassHz = Number(spec.voice?.highpassHz ?? 70);
+  const targetLoudness = Number(spec.voice?.targetLoudnessLufs ?? -16);
+  const truePeak = Number(spec.voice?.truePeakDb ?? -1.5);
+  const filter = `apad,highpass=f=${highpassHz},loudnorm=I=${targetLoudness}:TP=${truePeak}:LRA=7`;
+  run(ffmpeg, [
+    "-y",
+    "-i", input,
+    "-af", filter,
+    "-t", String(duration),
+    "-ar", String(humanSampleRate(spec)),
+    "-ac", "1",
+    "-c:a", "pcm_s24le",
+    output
+  ], "master human voiceover");
 }
 
 function concatVoiceoverSegments(files, directory, output, ffmpeg) {

@@ -14,6 +14,9 @@ assert.equal(spec.id, "refund-support-boundary");
 assert.equal(spec.shots.length, 4);
 assert.equal(spec.outputFile, "agentdiff-refund-support-demo.mp4");
 assert.equal(spec.voice.requireHumanForFinal, true);
+assert.equal(spec.voice.sampleRate, 48000);
+assert.equal(spec.voice.targetLoudnessLufs, -16);
+assert.equal(spec.voice.truePeakDb, -1.5);
 
 const renderUnits = getRenderUnits(spec);
 assert.equal(renderUnits.length, 6);

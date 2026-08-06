@@ -41,6 +41,9 @@
     "zoo:live": "node scripts/agent-zoo-live-openrouter.js",
     "demo:factory": "node scripts/demo-factory.js",
     "demo:video": "node scripts/demo-factory.js refund-support-boundary --stage all",
+    "demo:record-voice": "dotnet run --project scripts/demo-voice-recorder/Agentdiff.DemoVoiceRecorder.csproj",
+    "demo:record-voice:inputs": "dotnet run --project scripts/demo-voice-recorder/Agentdiff.DemoVoiceRecorder.csproj -- --list-inputs",
+    "demo:record-voice:level": "dotnet run --project scripts/demo-voice-recorder/Agentdiff.DemoVoiceRecorder.csproj -- --level-check",
     "video": "npm --prefix examples/remotion-demo run video",
     "outreach:draft": "node scripts/outreach/draft.js docs/outreach-targets.example.json",
     "test": "node tests/diff-extraction.test.mjs && node tests/diff-aware-context.test.mjs && node tests/map-drift.test.mjs && node tests/coding-agent-trace.test.mjs && node tests/openrouter-harness.test.mjs && node tests/outreach-draft.test.mjs && node tests/scan-limits.test.mjs && node tests/import-graph.test.mjs && node tests/reachability-provenance.test.mjs && node tests/action-required-gold.test.mjs && node tests/report-actionability.test.mjs && node tests/behavior-regression-fixtures.test.mjs && node tests/demo-factory.test.mjs && node tests/suppressions.test.mjs && node tests/init.test.mjs && node packages/cli/bin/agentdiff.js demo --out .agentdiff/runs/latest"

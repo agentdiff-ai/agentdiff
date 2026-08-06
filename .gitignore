@@ -12,6 +12,8 @@ node_modules/
 .agentdiff/open-pr-watchlist/
 .agentdiff/open-pr-prospect/
 .agentdiff/demos/
+scripts/demo-voice-recorder/bin/
+scripts/demo-voice-recorder/obj/
 .DS_Store
 dist/
 examples/remotion-demo/dist/

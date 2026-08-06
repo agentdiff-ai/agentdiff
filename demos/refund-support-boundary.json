@@ -17,7 +17,11 @@
   },
   "voice": {
     "preferred": "Microsoft Zira Desktop",
-    "requireHumanForFinal": true
+    "requireHumanForFinal": true,
+    "sampleRate": 48000,
+    "targetLoudnessLufs": -16,
+    "truePeakDb": -1.5,
+    "highpassHz": 70
   },
   "closingLine": "Normal CI tells you whether code still runs. Agentdiff tells you whether the agent's behavior boundary changed.",
   "shots": [
