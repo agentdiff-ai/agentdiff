@@ -217,9 +217,10 @@ Unreachable `.claude/skills/**` and `.agents/skills/**` files were also flagged 
 2. Parse richer framework config entrypoint shapes beyond simple LangGraph string definitions.
 3. Further split surface types for docs, tests, config, persistence, browser tools, and runtime agent entrypoints.
 4. Continue reducing broad high-risk verbs such as `create` unless supported by stronger context.
-5. Generate deterministic scenario suggestions for reachable high-risk surfaces.
 
 Completed since this review:
+
+- `scan` now writes deterministic, schema-valid scenario suggestions for concrete high-risk capabilities reachable from runtime entrypoints. These remain review artifacts and are never installed as trusted controls automatically.
 
 - Finding explanations now show path, reachability chain, risk words, imported-by evidence, and confidence reason.
 - `agentdiff.yml` suppressions now support path globs with reason/expiration and visible suppressed findings.
@@ -230,4 +231,4 @@ Completed since this review:
 
 ## Product Read
 
-The bakeoff supports the current direction: import graph reachability makes the scanner more useful than path/name heuristics alone. The next useful product work is deterministic scenario suggestions from reachable high-risk surfaces.
+The bakeoff supports the current direction: import graph reachability makes the scanner more useful than path/name heuristics alone. That evidence now feeds deterministic scenario suggestions; the next precision work should continue to come from observed misses in the zoo, gold sample, and public-repo lab.

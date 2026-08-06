@@ -10,6 +10,12 @@ node packages/cli/bin/agentdiff.js scenario validate .agentdiff/scenarios/starte
 
 `agentdiff init` creates a valid starter scenario. Replace its placeholder agent and tool names before connecting it to a harness.
 
+## Deterministic suggestions
+
+`agentdiff scan` writes `.agentdiff/runs/latest/scenario-suggestions.json` beside the generated map. Suggestions are created only when the scanner finds a concrete declared capability on a high-risk runtime surface that is reachable from a configured entrypoint. Each suggested scenario is schema-valid and starts with `must_not_call` plus `requires_confirmation` expectations.
+
+Suggestions are untrusted review artifacts. Inspect and adapt the input, fixture, and expectations before copying a scenario into `.agentdiff/scenarios/`; scan never changes trusted policy or scenario controls automatically.
+
 ## V0 Shape
 
 ```json

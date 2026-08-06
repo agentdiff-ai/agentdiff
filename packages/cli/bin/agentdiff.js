@@ -9,6 +9,7 @@ import {
   buildAgentMap,
   buildCapabilityPlan,
   buildClassificationReport,
+  buildScenarioSuggestions,
   loadScenarioFile,
   normalizeCapabilityPolicy,
   readJson
@@ -179,8 +180,9 @@ async function init({ force, githubAction }) {
   console.log("next:");
   console.log("1. scan this repo:");
   console.log("   agentdiff scan");
-  console.log("2. review the generated map:");
+  console.log("2. review the generated map and scenario suggestions:");
   console.log("   .agentdiff/runs/latest/map.json");
+  console.log("   .agentdiff/runs/latest/scenario-suggestions.json");
   if (githubAction) {
     console.log("3. open a pull request and check the sticky agentdiff comment");
   } else {
@@ -704,6 +706,7 @@ async function scan({ root, out }) {
       content: readTextWithLimit(file.absolutePath, file.size)
     }))
   });
+  map.scenario_suggestions = buildScenarioSuggestions(map);
   map.scan = {
     ...scanResult.stats,
     scan_limit_warnings: [...new Set([...scanResult.stats.scan_limit_warnings, ...langGraphConfig.warnings])],
@@ -718,10 +721,18 @@ async function scan({ root, out }) {
     reachability_provenance_counts: countBy(map.surfaces, "reachability_provenance"),
     actionability_counts: countBy(map.surfaces, "actionability")
   };
+  map.scan.scenario_suggestions = map.scenario_suggestions.length;
 
   const outPath = path.resolve(process.cwd(), out);
+  const suggestionsPath = path.join(path.dirname(outPath), "scenario-suggestions.json");
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, `${serializeMapWithinLimit(map)}\n`);
+  fs.writeFileSync(suggestionsPath, `${JSON.stringify({
+    version: "0.1",
+    generated_at: map.generated_at,
+    repo: map.repo,
+    suggestions: map.scenario_suggestions
+  }, null, 2)}\n`);
 
   console.log(`files considered: ${map.scan.files_considered}`);
   console.log(`scanned files: ${map.scan.files_scanned}`);
@@ -751,10 +762,12 @@ async function scan({ root, out }) {
   console.log(`review_recommended findings: ${map.scan.actionability_counts.review_recommended ?? 0}`);
   console.log(`context_only findings: ${map.scan.actionability_counts.context_only ?? 0}`);
   console.log(`likely_noise findings: ${map.scan.actionability_counts.likely_noise ?? 0}`);
+  console.log(`scenario suggestions: ${map.scan.scenario_suggestions}`);
   printTopActionabilityExamples(map);
   console.log(`agent surfaces: ${map.surfaces.length}`);
   console.log(`agents: ${map.agents.length}`);
   console.log(`map: ${outPath}`);
+  console.log(`scenario suggestions: ${suggestionsPath}`);
 }
 
 async function operator({ execute, task }) {

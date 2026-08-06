@@ -86,6 +86,8 @@ node packages/cli/bin/agentdiff.js run --example coding-agent-harness --recorded
 
 No hosted backend or model API key is required for plan, classify, scan, deterministic zoo, recorded harness, or agent repo lab runs.
 
+`scan` writes both the repo map and deterministic scenario suggestions for concrete high-risk capabilities reachable from configured runtime entrypoints. Suggestions are review artifacts under `.agentdiff/runs/latest/`; Agentdiff never installs them as trusted scenario controls automatically.
+
 ## Capability Plan
 
 `agentdiff plan` turns deterministic PR evidence into `allow`, `review`, or `block` decisions. Policies can require named scenario contracts, confirmation expectations, and passing normalized-trace results before consequential capabilities such as refunds, external messages, workflow scheduling, or state mutation are allowed through CI.
@@ -268,5 +270,5 @@ Experimental live adapters exist for Codex CLI, Claude Agent SDK, and OpenRouter
 1. Harness contract hardening.
 2. Base/head behavior runner.
 3. State fixture diff.
-4. Deterministic scenario suggestions for reachable high-risk surfaces.
+4. Broader deterministic scenario templates beyond confirmation and must-not-call checks.
 5. More precise resolver support for complex TS/package layouts.

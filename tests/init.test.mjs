@@ -41,6 +41,7 @@ try {
   assert.match(first.stdout, /package\.json workspaces: packages\/\*/);
   assert.match(first.stdout, /tsconfig\.json path aliases: @\/\*, @repo\/\*/);
   assert.match(first.stdout, /agentdiff scan/);
+  assert.match(first.stdout, /\.agentdiff\/runs\/latest\/scenario-suggestions\.json/);
   assert.doesNotMatch(first.stdout, /node packages\/cli\/bin\/agentdiff\.js/);
   assert.match(first.stdout, /rerun init with --github-action/);
 
