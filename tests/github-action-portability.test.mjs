@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 
 const repoRoot = process.cwd();
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentdiff-action-portability-"));
+assert.match(fs.readFileSync(path.join(repoRoot, "action.yml"), "utf8"), /using: node24/);
 
 try {
   const actionRoot = path.join(tempRoot, "action");

@@ -98,7 +98,7 @@ try {
   assert.match(workflow, /on:\n  pull_request:/);
   assert.match(workflow, /contents: read/);
   assert.match(workflow, /pull-requests: write/);
-  assert.match(workflow, /actions\/checkout@v4/);
+  assert.match(workflow, /actions\/checkout@v6/);
   assert.doesNotMatch(workflow, /actions\/setup-node/);
   assert.doesNotMatch(workflow, /npm (?:install|ci)/);
   assert.match(workflow, /Recommended v0 channel/);

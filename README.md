@@ -36,7 +36,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -51,6 +51,8 @@ jobs:
 `@v0` moves to the latest green `main` commit. Pin an immutable tag such as `@v0.1.0` if you need exact reproducibility. See [docs/release.md](docs/release.md).
 
 Static `plan` and `classify` runs do not install dependencies from the target repository and do not assume npm, pnpm, Yarn, or Bun. Add your own dependency-install step only when a repository-local scenario harness needs application packages at runtime.
+
+The Action runs on GitHub's Node 24 JavaScript-action runtime. Self-hosted runners must be current enough to execute Node 24 actions.
 
 To generate a starter local config and workflow from this repo:
 
