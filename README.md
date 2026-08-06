@@ -76,6 +76,7 @@ node packages/cli/bin/agentdiff.js demo
 node packages/cli/bin/agentdiff.js scan
 node packages/cli/bin/agentdiff.js classify --base main --head HEAD
 node packages/cli/bin/agentdiff.js plan --base main --head HEAD
+node packages/cli/bin/agentdiff.js run --base-ref main --head-ref HEAD --harness-module agentdiff.harness.js --scenario .agentdiff/scenarios/example.json
 node packages/cli/bin/agentdiff.js run --base traces/base.json --head traces/head.json --scenario .agentdiff/scenarios/example.json
 node packages/cli/bin/agentdiff.js run --example coding-agent-harness --recorded
 ```
@@ -91,7 +92,7 @@ node packages/cli/bin/agentdiff.js init --github-action
 node packages/cli/bin/agentdiff.js plan --base main --head HEAD
 ```
 
-The generated workflow uses the moving `@v0` Action channel. A blocked plan still writes the job summary and sticky PR comment before the check fails. Repository-local JS harness modules can execute the checked-out agent and return a normalized trace. Policies can bind that evidence to the current Git revision, approved harness IDs, and unchanged trace, scenario, and harness hashes. These are trusted-workspace integrity checks, not signed attestation. See [docs/capability-plan.md](docs/capability-plan.md).
+The generated workflow uses the moving `@v0` Action channel. A blocked plan still writes the job summary and sticky PR comment before the check fails. Repository-local JS harness modules can execute the agent in isolated base/head worktrees and return normalized traces. Policies can bind that evidence to the current Git revision, approved harness IDs, and unchanged trace, scenario, and harness hashes. These are trusted-workspace integrity checks, not signed attestation. See [docs/capability-plan.md](docs/capability-plan.md).
 
 ## Evidence
 

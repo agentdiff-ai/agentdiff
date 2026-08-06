@@ -235,6 +235,8 @@ function evaluateCoverage(rule, capability, scenarioById, runReports, expectedRe
       eligible: eligibility.eligible,
       rejection_reasons: eligibility.reasons,
       git_revision: report.execution_provenance?.git_revision ?? null,
+      base_revision: report.execution_provenance?.base_revision ?? null,
+      head_revision: report.execution_provenance?.head_revision ?? null,
       worktree_clean: report.execution_provenance?.worktree_dirty === false,
       harness_id: report.execution_provenance?.harness_id ?? null,
       artifacts_verified: report.execution_provenance?.verified === true,
@@ -350,6 +352,9 @@ function executionEligibility(report, requirement, expectedRevision) {
   const provenance = report.execution_provenance;
   if (requirement.current_revision) {
     if (!expectedRevision || provenance?.git_revision !== expectedRevision) reasons.push("revision_mismatch");
+    if (provenance?.head_revision && provenance.head_revision !== expectedRevision && !reasons.includes("revision_mismatch")) {
+      reasons.push("revision_mismatch");
+    }
     if (provenance?.worktree_dirty !== false) reasons.push("worktree_not_clean");
   }
   if (requirement.harnesses.length > 0 && !requirement.harnesses.includes(provenance?.harness_id)) {

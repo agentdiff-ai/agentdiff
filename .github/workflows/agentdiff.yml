@@ -22,7 +22,8 @@ jobs:
         continue-on-error: true
         run: >-
           node packages/cli/bin/agentdiff.js run
-          --base examples/support-ticket-agent/traces/base.json
+          --base-ref origin/${{ github.base_ref || 'main' }}
+          --head-ref HEAD
           --harness-module examples/demo-support-agent/harness.js
           --scenario examples/support-ticket-agent/scenario.json
           --out .agentdiff/runs/evidence/refund-approval

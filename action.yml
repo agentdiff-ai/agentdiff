@@ -7,12 +7,18 @@ inputs:
     required: false
     default: classify
   base:
-    description: "Base git ref for plan or classify mode."
+    description: "Base Git ref for plan/classify, or base trace path for run mode."
     required: false
   head:
-    description: "Head git ref for plan or classify mode."
+    description: "Head Git ref for plan/classify, or head trace path for run mode."
     required: false
     default: HEAD
+  base-ref:
+    description: "Base Git revision for run revision mode."
+    required: false
+  head-ref:
+    description: "Head Git revision for run revision mode."
+    required: false
   files:
     description: "Comma-separated file list for plan or classify mode. If set, base/head are ignored."
     required: false
