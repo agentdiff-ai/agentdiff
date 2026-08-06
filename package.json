@@ -1,10 +1,33 @@
 {
   "name": "agentdiff",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
   "type": "module",
   "description": "CI for agent behavior changes",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/agentdiff-ai/agentdiff#readme",
+  "bugs": {
+    "url": "https://github.com/agentdiff-ai/agentdiff/issues"
+  },
+  "keywords": [
+    "ai-agents",
+    "ci",
+    "github-actions",
+    "evals",
+    "llm"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "packages/cli/bin/",
+    "packages/core/src/",
+    "packages/report/src/",
+    "examples/support-ticket-agent/traces/",
+    "examples/coding-agent-harness/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agentdiff-ai/agentdiff.git"
@@ -12,7 +35,7 @@
   "bin": {
     "agentdiff": "packages/cli/bin/agentdiff.js"
   },
-  "dependencies": {
+  "devDependencies": {
     "openai": "^6.44.0"
   },
   "workspaces": [
@@ -36,6 +59,7 @@
     "study:open-prs": "node scripts/open-pr-watchlist.js",
     "study:prospect-open-prs": "node scripts/open-pr-prospect.js",
     "study:evidence-bank": "node scripts/evidence-bank-miner.js",
+    "package:smoke": "node tests/npm-package.test.mjs",
     "zoo": "node scripts/agent-zoo-test.js",
     "zoo:update": "node scripts/agent-zoo-test.js --update",
     "zoo:live": "node scripts/agent-zoo-live-openrouter.js",
@@ -46,6 +70,6 @@
     "demo:record-voice:level": "dotnet run --project scripts/demo-voice-recorder/Agentdiff.DemoVoiceRecorder.csproj -- --level-check",
     "video": "npm --prefix examples/remotion-demo run video",
     "outreach:draft": "node scripts/outreach/draft.js docs/outreach-targets.example.json",
-    "test": "node tests/diff-extraction.test.mjs && node tests/diff-aware-context.test.mjs && node tests/map-drift.test.mjs && node tests/coding-agent-trace.test.mjs && node tests/scenario-schema.test.mjs && node tests/scenario-run.test.mjs && node tests/capability-plan.test.mjs && node tests/github-action-portability.test.mjs && node tests/openrouter-harness.test.mjs && node tests/outreach-draft.test.mjs && node tests/scan-limits.test.mjs && node tests/import-graph.test.mjs && node tests/reachability-provenance.test.mjs && node tests/action-required-gold.test.mjs && node tests/report-actionability.test.mjs && node tests/behavior-regression-fixtures.test.mjs && node tests/demo-factory.test.mjs && node tests/suppressions.test.mjs && node tests/init.test.mjs && node packages/cli/bin/agentdiff.js demo --out .agentdiff/runs/latest"
+    "test": "node tests/diff-extraction.test.mjs && node tests/diff-aware-context.test.mjs && node tests/map-drift.test.mjs && node tests/coding-agent-trace.test.mjs && node tests/scenario-schema.test.mjs && node tests/scenario-run.test.mjs && node tests/capability-plan.test.mjs && node tests/github-action-portability.test.mjs && node tests/npm-package.test.mjs && node tests/openrouter-harness.test.mjs && node tests/outreach-draft.test.mjs && node tests/scan-limits.test.mjs && node tests/import-graph.test.mjs && node tests/reachability-provenance.test.mjs && node tests/action-required-gold.test.mjs && node tests/report-actionability.test.mjs && node tests/behavior-regression-fixtures.test.mjs && node tests/demo-factory.test.mjs && node tests/suppressions.test.mjs && node tests/init.test.mjs && node packages/cli/bin/agentdiff.js demo --out .agentdiff/runs/latest"
   }
 }

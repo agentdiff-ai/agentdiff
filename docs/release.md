@@ -83,4 +83,13 @@ agentdiff scan
 agentdiff classify --base main --head HEAD
 ```
 
-Before npm publishing, decide whether the public package should be the root `agentdiff` package or scoped workspace packages such as `@agentdiff/cli`.
+The public npm artifact is the root `agentdiff` package. It contains the CLI, core/report runtime modules, and the two built-in recorded demos; repository studies, tests, generated evidence, and development scripts are excluded. `openai` remains a development dependency, so static CLI installs have no runtime dependencies.
+
+Before publishing:
+
+```bash
+npm run package:smoke
+npm pack --dry-run
+```
+
+The package smoke test installs the generated tarball into an unrelated temporary project, runs `agentdiff init --github-action`, and runs the built-in demo through the installed bin. Publishing remains manual.

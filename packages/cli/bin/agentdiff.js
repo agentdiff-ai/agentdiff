@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   analyzeTracePair,
   buildAgentMap,
@@ -14,6 +14,8 @@ import {
   readJson
 } from "../../core/src/index.js";
 import { renderMarkdownReport } from "../../report/src/markdown.js";
+
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 main(process.argv.slice(2)).catch((error) => {
   console.error(`agentdiff: ${error.message}`);
@@ -31,8 +33,8 @@ async function main(argv) {
   if (command === "demo") {
     const out = readOption(argv, "--out") ?? ".agentdiff/runs/latest";
     await run({
-      base: "examples/support-ticket-agent/traces/base.json",
-      head: "examples/support-ticket-agent/traces/head.json",
+      base: builtInPath("examples", "support-ticket-agent", "traces", "base.json"),
+      head: builtInPath("examples", "support-ticket-agent", "traces", "head.json"),
       out,
       scenarioPath: readOption(argv, "--scenario"),
       harnessId: readOption(argv, "--harness-id") ?? "support-ticket-recorded"
@@ -103,8 +105,8 @@ async function main(argv) {
       }
 
       await run({
-        base: path.join("examples", example, "traces", "recorded", "base.json"),
-        head: path.join("examples", example, "traces", "recorded", "head.json"),
+        base: builtInPath("examples", example, "traces", "recorded", "base.json"),
+        head: builtInPath("examples", example, "traces", "recorded", "head.json"),
         out,
         scenarioPath: readOption(argv, "--scenario"),
         harnessId: readOption(argv, "--harness-id") ?? `${example}-recorded`
@@ -380,7 +382,7 @@ function validateScenarioCommand(scenarioPath) {
 
 async function runLiveExample({ example }) {
   const harness = process.env.AGENTDIFF_HARNESS || "codex-cli";
-  const adapterPath = path.resolve(process.cwd(), "examples", example, "harnesses", `${harness}.js`);
+  const adapterPath = builtInPath("examples", example, "harnesses", `${harness}.js`);
   if (!fs.existsSync(adapterPath)) {
     throw new Error(`live harness adapter not found: ${adapterPath}`);
   }
@@ -389,6 +391,10 @@ async function runLiveExample({ example }) {
     cwd: process.cwd(),
     stdio: "inherit"
   });
+}
+
+function builtInPath(...segments) {
+  return path.join(packageRoot, ...segments);
 }
 
 async function classify({ files, out }) {
