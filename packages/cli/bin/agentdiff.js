@@ -112,6 +112,26 @@ async function main(argv) {
       return;
     }
 
+    const baseRef = readOption(argv, "--base-ref");
+    const headRef = readOption(argv, "--head-ref");
+    if (baseRef || headRef) {
+      if (!baseRef || !headRef) throw new Error("run revision mode needs both --base-ref and --head-ref");
+      const harnessModule = readRequiredOption(argv, "--harness-module");
+      const scenarioPath = readRequiredOption(argv, "--scenario");
+      if (readOption(argv, "--base") || readOption(argv, "--head")) {
+        throw new Error("run revision mode cannot combine --base-ref/--head-ref with trace --base/--head");
+      }
+      await runRevisionPair({
+        baseRef,
+        headRef,
+        harnessModule,
+        scenarioPath,
+        out,
+        harnessId: readOption(argv, "--harness-id") ?? process.env.AGENTDIFF_HARNESS_ID
+      });
+      return;
+    }
+
     const base = readRequiredOption(argv, "--base");
     const head = readOption(argv, "--head");
     const harnessModule = readOption(argv, "--harness-module");
@@ -199,8 +219,102 @@ async function run({ base, head, out, scenarioPath, harnessId, harnessModule }) 
     harnessModulePath
   });
   const report = analyzeTracePair({ baseTrace, headTrace, scenario, executionProvenance });
-  const markdown = renderMarkdownReport(report);
+  writeRunReport({ report, outDir });
+}
 
+async function runRevisionPair({ baseRef, headRef, harnessModule, scenarioPath, out, harnessId }) {
+  const repoRoot = process.cwd();
+  const outDir = path.resolve(repoRoot, out);
+  const relativeHarnessPath = repositoryRelativeInput(harnessModule, "harness module");
+  const relativeScenarioPath = repositoryRelativeInput(scenarioPath, "scenario");
+  const worktreeRoot = path.join(repoRoot, ".agentdiff", "worktrees");
+  fs.mkdirSync(worktreeRoot, { recursive: true });
+  const tempRoot = fs.mkdtempSync(path.join(worktreeRoot, "revision-"));
+  const baseWorktree = path.join(tempRoot, "base");
+  const headWorktree = path.join(tempRoot, "head");
+  let baseAdded = false;
+  let headAdded = false;
+
+  try {
+    addDetachedWorktree(repoRoot, baseWorktree, baseRef);
+    baseAdded = true;
+    addDetachedWorktree(repoRoot, headWorktree, headRef);
+    headAdded = true;
+
+    const headHarnessPath = path.join(headWorktree, relativeHarnessPath);
+    const baseHarnessPath = path.join(baseWorktree, relativeHarnessPath);
+    const headScenarioPath = path.join(headWorktree, relativeScenarioPath);
+    if (!fs.existsSync(headHarnessPath)) throw new Error(`harness module is missing at head ref ${headRef}: ${relativeHarnessPath}`);
+    if (!fs.existsSync(headScenarioPath)) throw new Error(`scenario is missing at head ref ${headRef}: ${relativeScenarioPath}`);
+
+    const scenario = loadScenarioFile(headScenarioPath);
+    fs.mkdirSync(path.dirname(baseHarnessPath), { recursive: true });
+    fs.copyFileSync(headHarnessPath, baseHarnessPath);
+
+    const baseResult = await executeHarnessModule({ harnessModulePath: baseHarnessPath, scenario, harnessId, cwd: baseWorktree });
+    const headResult = await executeHarnessModule({ harnessModulePath: headHarnessPath, scenario, harnessId, cwd: headWorktree });
+    if (baseResult.harnessId !== headResult.harnessId) {
+      throw new Error(`harness identity changed between revisions: ${baseResult.harnessId} != ${headResult.harnessId}`);
+    }
+
+    fs.mkdirSync(outDir, { recursive: true });
+    const basePath = path.join(outDir, "generated-base-trace.json");
+    const headPath = path.join(outDir, "generated-head-trace.json");
+    fs.writeFileSync(basePath, `${JSON.stringify(baseResult.trace, null, 2)}\n`);
+    fs.writeFileSync(headPath, `${JSON.stringify(headResult.trace, null, 2)}\n`);
+
+    const currentHarnessPath = path.resolve(repoRoot, relativeHarnessPath);
+    const currentScenarioPath = path.resolve(repoRoot, relativeScenarioPath);
+    const executionProvenance = buildExecutionProvenance({
+      basePath,
+      headPath,
+      scenarioPath: currentScenarioPath,
+      harnessId: headResult.harnessId,
+      harnessModulePath: currentHarnessPath,
+      baseRevision: resolveGitRevision(baseRef),
+      headRevision: resolveGitRevision(headRef)
+    });
+    const report = analyzeTracePair({
+      baseTrace: baseResult.trace,
+      headTrace: headResult.trace,
+      scenario,
+      executionProvenance
+    });
+    writeRunReport({ report, outDir });
+  } finally {
+    if (headAdded) removeWorktree(repoRoot, headWorktree, worktreeRoot);
+    if (baseAdded) removeWorktree(repoRoot, baseWorktree, worktreeRoot);
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+function repositoryRelativeInput(inputPath, label) {
+  if (path.isAbsolute(inputPath)) throw new Error(`${label} path must be repository-relative in revision mode`);
+  const normalized = path.normalize(inputPath);
+  if (normalized === ".." || normalized.startsWith(`..${path.sep}`)) throw new Error(`${label} path must stay inside the repository`);
+  return normalized;
+}
+
+function addDetachedWorktree(repoRoot, targetPath, ref) {
+  execFileSync("git", ["worktree", "add", "--detach", targetPath, ref], { cwd: repoRoot, stdio: "ignore" });
+}
+
+function removeWorktree(repoRoot, targetPath, worktreeRoot) {
+  try {
+    execFileSync("git", ["worktree", "remove", "--force", targetPath], { cwd: repoRoot, stdio: "ignore" });
+  } catch {
+    const allowedRoot = path.resolve(worktreeRoot);
+    const resolvedTarget = path.resolve(targetPath);
+    if (resolvedTarget === allowedRoot || !resolvedTarget.startsWith(`${allowedRoot}${path.sep}`)) {
+      throw new Error(`refusing to clean worktree outside ${allowedRoot}: ${resolvedTarget}`);
+    }
+    fs.rmSync(resolvedTarget, { recursive: true, force: true });
+    execFileSync("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "ignore" });
+  }
+}
+
+function writeRunReport({ report, outDir }) {
+  const markdown = renderMarkdownReport(report);
   fs.writeFileSync(path.join(outDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   fs.writeFileSync(path.join(outDir, "report.md"), `${markdown}\n`);
 
@@ -214,25 +328,31 @@ async function run({ base, head, out, scenarioPath, harnessId, harnessModule }) 
   if (report.scenario_result?.status === "fail") process.exitCode = 1;
 }
 
-async function executeHarnessModule({ harnessModulePath, scenario, harnessId }) {
+async function executeHarnessModule({ harnessModulePath, scenario, harnessId, cwd = process.cwd() }) {
   if (!fs.existsSync(harnessModulePath) || !fs.statSync(harnessModulePath).isFile()) {
     throw new Error(`harness module not found: ${harnessModulePath}`);
   }
 
-  const module = await import(pathToFileURL(harnessModulePath).href);
-  const harness = module.default && typeof module.default === "object" ? module.default : module;
-  const runScenario = module.runScenario ?? harness.runScenario;
-  if (typeof runScenario !== "function") {
-    throw new Error("harness module must export async function runScenario({ scenario, cwd })");
-  }
-  const resolvedHarnessId = harnessId ?? module.harnessId ?? harness.harnessId;
-  if (typeof resolvedHarnessId !== "string" || resolvedHarnessId.trim() === "") {
-    throw new Error("harness module must export a non-empty harnessId or run must receive --harness-id");
-  }
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(cwd);
+    const module = await import(`${pathToFileURL(harnessModulePath).href}?agentdiff=${Date.now()}`);
+    const harness = module.default && typeof module.default === "object" ? module.default : module;
+    const runScenario = module.runScenario ?? harness.runScenario;
+    if (typeof runScenario !== "function") {
+      throw new Error("harness module must export async function runScenario({ scenario, cwd })");
+    }
+    const resolvedHarnessId = harnessId ?? module.harnessId ?? harness.harnessId;
+    if (typeof resolvedHarnessId !== "string" || resolvedHarnessId.trim() === "") {
+      throw new Error("harness module must export a non-empty harnessId or run must receive --harness-id");
+    }
 
-  const trace = await runScenario({ scenario: structuredClone(scenario), cwd: process.cwd() });
-  validateHarnessTrace(trace, scenario.id);
-  return { harnessId: resolvedHarnessId.trim(), trace };
+    const trace = await runScenario({ scenario: structuredClone(scenario), cwd });
+    validateHarnessTrace(trace, scenario.id);
+    return { harnessId: resolvedHarnessId.trim(), trace };
+  } finally {
+    process.chdir(previousCwd);
+  }
 }
 
 function validateHarnessTrace(trace, scenarioId) {
@@ -320,7 +440,15 @@ async function plan({ files, out, policyPath, scenariosPath, runReportsPath, exp
   if (report.decision === "block") process.exitCode = 1;
 }
 
-function buildExecutionProvenance({ basePath, headPath, scenarioPath, harnessId, harnessModulePath }) {
+function buildExecutionProvenance({
+  basePath,
+  headPath,
+  scenarioPath,
+  harnessId,
+  harnessModulePath,
+  baseRevision = null,
+  headRevision = null
+}) {
   const artifacts = {
     base_trace: artifactDescriptor(basePath),
     head_trace: artifactDescriptor(headPath)
@@ -332,6 +460,8 @@ function buildExecutionProvenance({ basePath, headPath, scenarioPath, harnessId,
     schema_version: "0.1",
     git_revision: resolveGitRevision("HEAD"),
     worktree_dirty: isGitWorktreeDirty(),
+    base_revision: baseRevision,
+    head_revision: headRevision,
     harness_id: harnessId || "recorded-trace",
     generated_at: new Date().toISOString(),
     artifacts
@@ -1726,6 +1856,9 @@ Commands:
 
   agentdiff run --base <trace.json> (--head <trace.json> | --harness-module <module.js>) [--scenario <scenario.json>] [--harness-id <id>] [--out <dir>]
     Compare base/head normalized traces and write report.json + report.md.
+
+  agentdiff run --base-ref <git-ref> --head-ref <git-ref> --harness-module <module.js> --scenario <scenario.json> [--out <dir>]
+    Execute the same repository-local harness against isolated base/head revisions.
 
   agentdiff run --example coding-agent-harness --recorded [--out <dir>]
     Run a recorded harness demo without API keys.

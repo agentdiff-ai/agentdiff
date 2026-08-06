@@ -75,11 +75,12 @@ Required scenario IDs are loaded from `.agentdiff/scenarios/**/*.json` and valid
 
 See [scenarios.md](scenarios.md) for all supported expectation types.
 
-Evaluate a normalized head trace against the scenario before planning:
+Execute the same deterministic harness against both Git revisions before planning:
 
 ```bash
 node packages/cli/bin/agentdiff.js run \
-  --base traces/base.json \
+  --base-ref origin/main \
+  --head-ref HEAD \
   --harness-module agentdiff.harness.js \
   --scenario .agentdiff/scenarios/refund.json \
   --out .agentdiff/runs/evidence/refund
@@ -99,7 +100,11 @@ export async function runScenario({ scenario, cwd }) {
 }
 ```
 
-`runScenario` may execute repository code, so only use harness modules reviewed as part of the repository. Agentdiff validates the basic normalized trace shape and records the generated head trace plus the harness source as hashed evidence. Supplying `--head traces/head.json` remains supported for recorded traces.
+`runScenario` may execute repository code, so only use harness modules reviewed as part of the repository. Revision mode creates isolated detached worktrees under `.agentdiff/worktrees`, applies the head harness contract to both revisions, and writes generated base/head traces. This keeps the test contract constant while the agent implementation changes. Worktrees remain beneath the current checkout so Node can resolve installed root dependencies without copying or linking them.
+
+In v0, keep the harness module self-contained apart from imports into repository code. Helper modules added only on head will not be copied into the base worktree, and workspace-package symlinks may still resolve to the current checkout rather than the isolated revision.
+
+Agentdiff validates the basic normalized trace shape and records both generated traces plus the harness source as hashed evidence. Supplying `--base traces/base.json --head traces/head.json` remains supported for recorded traces, and `--base traces/base.json --harness-module ...` remains available for head-only execution.
 
 When scenario expectations fail, `run` writes its report and exits nonzero. CI can use `continue-on-error: true` for that evidence step, then let `plan --run-reports .agentdiff/runs/evidence` produce the final policy decision and sticky comment.
 
@@ -107,7 +112,7 @@ Upload `.agentdiff/runs` as a CI artifact when reviewers need the generated trac
 
 Evidence aggregation is conservative: every eligible supplied result for a required scenario must be structurally valid and pass. Conflicting pass/fail results or malformed result summaries do not satisfy policy coverage.
 
-`run` records the current Git revision, tracked-worktree cleanliness, a stable harness ID, and SHA-256 hashes for the base trace, head trace, scenario, and harness module when used. When policy enables `current_revision`, `artifacts`, or `harnesses`, `plan` only accepts evidence from a clean tracked worktree for the planned head revision, from an approved harness, whose repository-local artifacts still match the recorded hashes.
+`run` records the current Git revision, behavior base/head revisions, tracked-worktree cleanliness, a stable harness ID, and SHA-256 hashes for the base trace, head trace, scenario, and harness module when used. When policy enables `current_revision`, `artifacts`, or `harnesses`, `plan` only accepts evidence from a clean tracked worktree for the planned head revision, from an approved harness, whose repository-local artifacts still match the recorded hashes.
 
 This is an integrity check inside the same trusted CI workspace. It prevents stale or accidentally copied evidence from satisfying policy, but it is not a signature, remote attestation, or proof that a harness faithfully represented model execution. Keep trace and scenario artifacts inside the repository workspace so `plan` can re-read and verify them.
 

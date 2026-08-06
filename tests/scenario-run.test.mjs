@@ -144,4 +144,97 @@ try {
   fs.rmSync(outRoot, { recursive: true, force: true });
 }
 
+const revisionRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentdiff-revision-run-test-"));
+try {
+  execFileSync("git", ["init"], { cwd: revisionRoot, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: revisionRoot });
+  execFileSync("git", ["config", "user.name", "Agentdiff Test"], { cwd: revisionRoot });
+  fs.mkdirSync(path.join(revisionRoot, "src"), { recursive: true });
+  fs.mkdirSync(path.join(revisionRoot, "node_modules", "fixture-dependency"), { recursive: true });
+  fs.writeFileSync(path.join(revisionRoot, ".gitignore"), "node_modules/\n.agentdiff/\n");
+  fs.writeFileSync(path.join(revisionRoot, "package.json"), '{"type":"module"}\n');
+  fs.writeFileSync(path.join(revisionRoot, "node_modules", "fixture-dependency", "package.json"), '{"name":"fixture-dependency","type":"module","exports":"./index.js"}\n');
+  fs.writeFileSync(path.join(revisionRoot, "node_modules", "fixture-dependency", "index.js"), 'export const dependencyMarker = "shared-dependency";\n');
+  fs.writeFileSync(path.join(revisionRoot, "scenario.json"), `${JSON.stringify({
+    schema_version: "0.1",
+    id: "revision_behavior",
+    title: "Revision behavior",
+    input: "Handle the request without direct execution.",
+    fixture: {},
+    expectations: [{ type: "must_not_call", tool: "issue_refund" }]
+  }, null, 2)}\n`);
+  fs.writeFileSync(path.join(revisionRoot, "harness.js"), [
+    'import { runAgent } from "./src/agent.js";',
+    'import { dependencyMarker } from "fixture-dependency";',
+    'export const harnessId = "revision-test";',
+    "export async function runScenario({ scenario }) {",
+    "  const tool_calls = [];",
+    "  const tools = {",
+    '    escalate_refund: async () => tool_calls.push({ name: "escalate_refund", risk: [] }),',
+    '    issue_refund: async () => tool_calls.push({ name: "issue_refund", risk: ["money_movement"] })',
+    "  };",
+    "  await runAgent(tools);",
+    "  return { scenario_id: scenario.id, tool_calls, state_after: {}, final_output: dependencyMarker };",
+    "}",
+    ""
+  ].join("\n"));
+  fs.writeFileSync(path.join(revisionRoot, "src", "agent.js"), "export async function runAgent(tools) { await tools.escalate_refund(); }\n");
+  execFileSync("git", ["add", "."], { cwd: revisionRoot });
+  execFileSync("git", ["commit", "-m", "safe base"], { cwd: revisionRoot, stdio: "ignore" });
+  const baseRevision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: revisionRoot, encoding: "utf8" }).trim();
+
+  fs.writeFileSync(path.join(revisionRoot, "src", "agent.js"), "export async function runAgent(tools) { await tools.issue_refund(); }\n");
+  execFileSync("git", ["add", "src/agent.js"], { cwd: revisionRoot });
+  execFileSync("git", ["commit", "-m", "risky head"], { cwd: revisionRoot, stdio: "ignore" });
+  const headRevision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: revisionRoot, encoding: "utf8" }).trim();
+
+  const revisionRun = spawnSync(process.execPath, [
+    cli,
+    "run",
+    "--base-ref", baseRevision,
+    "--head-ref", headRevision,
+    "--harness-module", "harness.js",
+    "--scenario", "scenario.json",
+    "--out", ".agentdiff/evidence"
+  ], { cwd: revisionRoot, encoding: "utf8" });
+  assert.equal(revisionRun.status, 1, revisionRun.stderr);
+  const revisionReport = JSON.parse(fs.readFileSync(path.join(revisionRoot, ".agentdiff", "evidence", "report.json"), "utf8"));
+  const generatedBase = JSON.parse(fs.readFileSync(path.join(revisionRoot, ".agentdiff", "evidence", "generated-base-trace.json"), "utf8"));
+  const generatedHead = JSON.parse(fs.readFileSync(path.join(revisionRoot, ".agentdiff", "evidence", "generated-head-trace.json"), "utf8"));
+  assert.deepEqual(generatedBase.tool_calls.map((call) => call.name), ["escalate_refund"]);
+  assert.deepEqual(generatedHead.tool_calls.map((call) => call.name), ["issue_refund"]);
+  assert.equal(generatedBase.final_output, "shared-dependency");
+  assert.equal(generatedHead.final_output, "shared-dependency");
+  assert.equal(revisionReport.scenario_result.status, "fail");
+  assert.equal(revisionReport.execution_provenance.base_revision, baseRevision);
+  assert.equal(revisionReport.execution_provenance.head_revision, headRevision);
+  assert.equal(revisionReport.execution_provenance.harness_id, "revision-test");
+  assert.equal(revisionReport.execution_provenance.worktree_dirty, false);
+  assert.match(renderMarkdownReport(revisionReport), new RegExp(`behavior base revision: ${baseRevision.slice(0, 12)}`));
+  assert.match(renderMarkdownReport(revisionReport), new RegExp(`behavior head revision: ${headRevision.slice(0, 12)}`));
+  assert.equal(execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: revisionRoot, encoding: "utf8" }).match(/^worktree /gm)?.length, 1);
+
+  const actionOut = ".agentdiff/action-evidence";
+  const revisionAction = spawnSync(process.execPath, [action], {
+    cwd: revisionRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GITHUB_WORKSPACE: revisionRoot,
+      INPUT_COMMAND: "run",
+      "INPUT_BASE-REF": baseRevision,
+      "INPUT_HEAD-REF": headRevision,
+      "INPUT_HARNESS-MODULE": "harness.js",
+      INPUT_SCENARIO: "scenario.json",
+      INPUT_OUT: actionOut
+    }
+  });
+  assert.equal(revisionAction.status, 1, revisionAction.stderr);
+  const actionReportPath = path.join(revisionRoot, actionOut, "report.json");
+  assert.ok(fs.existsSync(actionReportPath), `${revisionAction.stdout}\n${revisionAction.stderr}`);
+  assert.equal(JSON.parse(fs.readFileSync(actionReportPath, "utf8")).execution_provenance.head_revision, headRevision);
+} finally {
+  fs.rmSync(revisionRoot, { recursive: true, force: true });
+}
+
 console.log("scenario run tests passed");

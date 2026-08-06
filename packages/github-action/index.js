@@ -48,6 +48,15 @@ function buildArgs(commandName, outDir) {
     args.push("--out", outDir);
 
     if (!example && !truthyInput("live")) {
+      const baseRef = input("base-ref");
+      const headRef = input("head-ref");
+      if (baseRef || headRef) {
+        if (!baseRef || !headRef || !harnessModule || !scenario) {
+          throw new Error("run revision mode needs base-ref, head-ref, harness-module, and scenario inputs.");
+        }
+        args.push("--base-ref", baseRef, "--head-ref", headRef);
+        return args;
+      }
       const base = input("base");
       const head = input("head");
       if (!base || (!head && !harnessModule)) {

@@ -137,7 +137,10 @@ async function inspectRepo(slug) {
   }
 
   const cloneDir = path.join(runRoot, slug.replace(/[\\/]/g, "__"));
-  const clone = run("git", ["clone", "--depth=1", `https://github.com/${slug}.git`, cloneDir], runRoot, 240_000);
+  const cloneArgs = process.platform === "win32"
+    ? ["-c", "core.longpaths=true", "clone", "--depth=1", `https://github.com/${slug}.git`, cloneDir]
+    : ["clone", "--depth=1", `https://github.com/${slug}.git`, cloneDir];
+  const clone = run("git", cloneArgs, runRoot, 240_000);
   result.clone = summarizeStep(clone);
   if (!clone.ok) {
     result.status = "crashed";

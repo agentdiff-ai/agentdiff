@@ -154,6 +154,16 @@ const staleExecution = buildCapabilityPlan({
 assert.equal(staleExecution.decision, "block");
 assert.deepEqual(staleExecution.capability_changes[0].coverage.stale_execution_scenarios, ["refund_requires_human_approval"]);
 
+const mismatchedBehaviorHead = buildCapabilityPlan({
+  classificationReport,
+  policy,
+  scenarios: [scenario],
+  runReports: [{ ...passingRunReport, execution_provenance: executionProvenance({ head_revision: "different-head" }) }],
+  expectedRevision
+});
+assert.equal(mismatchedBehaviorHead.decision, "block");
+assert.deepEqual(mismatchedBehaviorHead.capability_changes[0].coverage.stale_execution_scenarios, ["refund_requires_human_approval"]);
+
 const unapprovedHarness = buildCapabilityPlan({
   classificationReport,
   policy,
