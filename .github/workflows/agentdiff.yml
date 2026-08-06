@@ -67,4 +67,4 @@ jobs:
         if: always()
         with:
           name: agentdiff-report
-          path: .agentdiff/runs/latest
+          path: .agentdiff/runs
