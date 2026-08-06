@@ -114,9 +114,9 @@ export async function runScenario({ scenario, cwd }) {
 }
 ```
 
-`runScenario` may execute repository code, so only use harness modules reviewed as part of the repository. Revision mode creates isolated detached worktrees under `.agentdiff/worktrees`, applies the head harness contract to both revisions, and writes generated base/head traces. This keeps the test contract constant while the agent implementation changes. Worktrees remain beneath the current checkout so Node can resolve installed root dependencies without copying or linking them.
+`runScenario` may execute repository code, so only use harness modules reviewed as part of the repository. Revision mode creates isolated detached worktrees under `.agentdiff/worktrees` and writes generated base/head traces. Before importing either harness, Agentdiff requires the harness module and scenario to exist with identical bytes at base and head. A pull request that changes or introduces either review control is rejected before the module can execute. Each worktree then runs its own identical harness copy, keeping the test contract constant while the agent implementation changes. Worktrees remain beneath the current checkout so Node can resolve installed root dependencies without copying or linking them.
 
-In v0, keep the harness module self-contained apart from imports into repository code. Helper modules added only on head will not be copied into the base worktree, and workspace-package symlinks may still resolve to the current checkout rather than the isolated revision.
+In v0, keep the harness module self-contained apart from imports into repository code. Repository imports are still executable code, not a sandbox boundary; use the same precautions you use for any CI job that runs pull-request code. Protect harness helper modules with `controls.paths`. Helper modules added only on head are unavailable in the base worktree, and workspace-package symlinks may still resolve to the current checkout rather than the isolated revision.
 
 Agentdiff validates the basic normalized trace shape and records both generated traces plus the harness source as hashed evidence. Supplying `--base traces/base.json --head traces/head.json` remains supported for recorded traces, and `--base traces/base.json --harness-module ...` remains available for head-only execution.
 

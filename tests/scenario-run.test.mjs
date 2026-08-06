@@ -163,7 +163,7 @@ try {
     fixture: {},
     expectations: [{ type: "must_not_call", tool: "issue_refund" }]
   }, null, 2)}\n`);
-  fs.writeFileSync(path.join(revisionRoot, "harness.js"), [
+  const revisionHarnessSource = [
     'import { runAgent } from "./src/agent.js";',
     'import { dependencyMarker } from "fixture-dependency";',
     'export const harnessId = "revision-test";',
@@ -177,7 +177,8 @@ try {
     "  return { scenario_id: scenario.id, tool_calls, state_after: {}, final_output: dependencyMarker };",
     "}",
     ""
-  ].join("\n"));
+  ].join("\n");
+  fs.writeFileSync(path.join(revisionRoot, "harness.js"), revisionHarnessSource);
   fs.writeFileSync(path.join(revisionRoot, "src", "agent.js"), "export async function runAgent(tools) { await tools.escalate_refund(); }\n");
   execFileSync("git", ["add", "."], { cwd: revisionRoot });
   execFileSync("git", ["commit", "-m", "safe base"], { cwd: revisionRoot, stdio: "ignore" });
@@ -233,6 +234,47 @@ try {
   const actionReportPath = path.join(revisionRoot, actionOut, "report.json");
   assert.ok(fs.existsSync(actionReportPath), `${revisionAction.stdout}\n${revisionAction.stderr}`);
   assert.equal(JSON.parse(fs.readFileSync(actionReportPath, "utf8")).execution_provenance.head_revision, headRevision);
+
+  const markerPath = path.join(revisionRoot, "changed-harness-executed.txt");
+  fs.writeFileSync(
+    path.join(revisionRoot, "harness.js"),
+    `import fs from "node:fs";\nfs.writeFileSync(${JSON.stringify(markerPath)}, "executed");\n${fs.readFileSync(path.join(revisionRoot, "harness.js"), "utf8")}`
+  );
+  execFileSync("git", ["add", "harness.js"], { cwd: revisionRoot });
+  execFileSync("git", ["commit", "-m", "change review harness"], { cwd: revisionRoot, stdio: "ignore" });
+  const changedHarnessRevision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: revisionRoot, encoding: "utf8" }).trim();
+  const changedHarnessRun = spawnSync(process.execPath, [
+    cli,
+    "run",
+    "--base-ref", headRevision,
+    "--head-ref", changedHarnessRevision,
+    "--harness-module", "harness.js",
+    "--scenario", "scenario.json",
+    "--out", ".agentdiff/changed-harness-evidence"
+  ], { cwd: revisionRoot, encoding: "utf8" });
+  assert.equal(changedHarnessRun.status, 1);
+  assert.match(changedHarnessRun.stderr, /harness module changed.*refusing to execute a changed review control/i);
+  assert.equal(fs.existsSync(markerPath), false, "changed harness must be rejected before module import");
+
+  fs.writeFileSync(path.join(revisionRoot, "harness.js"), revisionHarnessSource);
+  const changedScenario = JSON.parse(fs.readFileSync(path.join(revisionRoot, "scenario.json"), "utf8"));
+  changedScenario.title = "Changed review scenario";
+  fs.writeFileSync(path.join(revisionRoot, "scenario.json"), `${JSON.stringify(changedScenario, null, 2)}\n`);
+  execFileSync("git", ["add", "harness.js", "scenario.json"], { cwd: revisionRoot });
+  execFileSync("git", ["commit", "-m", "change review scenario"], { cwd: revisionRoot, stdio: "ignore" });
+  const changedScenarioRevision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: revisionRoot, encoding: "utf8" }).trim();
+  const changedScenarioRun = spawnSync(process.execPath, [
+    cli,
+    "run",
+    "--base-ref", headRevision,
+    "--head-ref", changedScenarioRevision,
+    "--harness-module", "harness.js",
+    "--scenario", "scenario.json",
+    "--out", ".agentdiff/changed-scenario-evidence"
+  ], { cwd: revisionRoot, encoding: "utf8" });
+  assert.equal(changedScenarioRun.status, 1);
+  assert.match(changedScenarioRun.stderr, /scenario changed.*refusing to execute a changed review control/i);
+  assert.equal(fs.existsSync(markerPath), false);
 } finally {
   fs.rmSync(revisionRoot, { recursive: true, force: true });
 }

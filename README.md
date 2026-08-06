@@ -95,7 +95,7 @@ node packages/cli/bin/agentdiff.js init --github-action
 node packages/cli/bin/agentdiff.js plan --base main --head HEAD
 ```
 
-The generated workflow uses the moving `@v0` Action channel. A blocked plan still writes the job summary and sticky PR comment before the check fails. Repository-local JS harness modules can execute the agent in isolated base/head worktrees and return normalized traces. Policies can bind that evidence to the current Git revision, approved harness IDs, and unchanged trace, scenario, and harness hashes. Plans also block same-PR changes to the policy, loaded scenarios, evidence harness, and configured workflow controls so a change cannot approve itself by weakening its reviewer. These are trusted-workspace integrity checks, not signed attestation. See [docs/capability-plan.md](docs/capability-plan.md).
+The generated workflow uses the moving `@v0` Action channel. A blocked plan still writes the job summary and sticky PR comment before the check fails. Repository-local JS harness modules can execute the agent in isolated base/head worktrees and return normalized traces. Revision mode refuses to import a harness or scenario whose bytes changed between base and head. Policies can bind evidence to the current Git revision, approved harness IDs, and unchanged trace, scenario, and harness hashes. Plans also block same-PR changes to the policy, loaded scenarios, evidence harness, and configured workflow controls so a change cannot approve itself by weakening its reviewer. These are trusted-workspace integrity checks, not a sandbox, signature, or remote attestation. See [docs/capability-plan.md](docs/capability-plan.md).
 
 ## Evidence
 

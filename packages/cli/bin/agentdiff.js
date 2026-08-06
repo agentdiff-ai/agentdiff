@@ -246,12 +246,25 @@ async function runRevisionPair({ baseRef, headRef, harnessModule, scenarioPath, 
     const headHarnessPath = path.join(headWorktree, relativeHarnessPath);
     const baseHarnessPath = path.join(baseWorktree, relativeHarnessPath);
     const headScenarioPath = path.join(headWorktree, relativeScenarioPath);
-    if (!fs.existsSync(headHarnessPath)) throw new Error(`harness module is missing at head ref ${headRef}: ${relativeHarnessPath}`);
-    if (!fs.existsSync(headScenarioPath)) throw new Error(`scenario is missing at head ref ${headRef}: ${relativeScenarioPath}`);
+    const baseScenarioPath = path.join(baseWorktree, relativeScenarioPath);
+    assertUnchangedRevisionControl({
+      label: "harness module",
+      relativePath: relativeHarnessPath,
+      basePath: baseHarnessPath,
+      headPath: headHarnessPath,
+      baseRef,
+      headRef
+    });
+    assertUnchangedRevisionControl({
+      label: "scenario",
+      relativePath: relativeScenarioPath,
+      basePath: baseScenarioPath,
+      headPath: headScenarioPath,
+      baseRef,
+      headRef
+    });
 
     const scenario = loadScenarioFile(headScenarioPath);
-    fs.mkdirSync(path.dirname(baseHarnessPath), { recursive: true });
-    fs.copyFileSync(headHarnessPath, baseHarnessPath);
 
     const baseResult = await executeHarnessModule({ harnessModulePath: baseHarnessPath, scenario, harnessId, cwd: baseWorktree });
     const headResult = await executeHarnessModule({ harnessModulePath: headHarnessPath, scenario, harnessId, cwd: headWorktree });
@@ -295,6 +308,24 @@ function repositoryRelativeInput(inputPath, label) {
   const normalized = path.normalize(inputPath);
   if (normalized === ".." || normalized.startsWith(`..${path.sep}`)) throw new Error(`${label} path must stay inside the repository`);
   return normalized;
+}
+
+function assertUnchangedRevisionControl({ label, relativePath, basePath, headPath, baseRef, headRef }) {
+  if (!fs.existsSync(basePath)) {
+    throw new Error(`${label} is missing at base ref ${baseRef}: ${relativePath}; refusing to execute a review control introduced by the head revision`);
+  }
+  if (!fs.existsSync(headPath)) {
+    throw new Error(`${label} is missing at head ref ${headRef}: ${relativePath}`);
+  }
+  if (!fs.statSync(basePath).isFile() || !fs.statSync(headPath).isFile()) {
+    throw new Error(`${label} must be a file at both revisions: ${relativePath}`);
+  }
+
+  const baseContent = fs.readFileSync(basePath);
+  const headContent = fs.readFileSync(headPath);
+  if (!baseContent.equals(headContent)) {
+    throw new Error(`${label} changed between ${baseRef} and ${headRef}: ${relativePath}; refusing to execute a changed review control`);
+  }
 }
 
 function addDetachedWorktree(repoRoot, targetPath, ref) {
