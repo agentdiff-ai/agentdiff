@@ -1099,15 +1099,17 @@ function confidenceReasonForSurface(surface) {
 }
 
 function explanationForDiffAwareFinding(finding) {
+  const lowPriority = finding.actionability === "context_only" || finding.actionability === "likely_noise";
   return {
     why_flagged: unique([
       `classified as ${finding.finding_type}`,
-      ...finding.added_high_risk_calls.map((call) => `added high-risk call: ${call}`),
+      finding.actionability_reason,
+      ...finding.added_high_risk_calls.map((call) => lowPriority ? `action-like call in low-priority surface: ${call}` : `added high-risk call: ${call}`),
       ...finding.removed_safer_calls.map((call) => `removed safer/guardrail call: ${call}`)
-    ]),
+    ].filter(Boolean)),
     reachability_chain: [finding.path],
     risk_evidence: finding.evidence,
-    confidence_reason: finding.severity === "high" ? "high because this diff adds high-risk calls inside a changed surface" : "medium because this diff changes guardrail behavior"
+    confidence_reason: finding.actionability_reason ?? (finding.severity === "high" ? "high because this diff adds high-risk calls inside a changed surface" : "medium because this diff changes guardrail behavior")
   };
 }
 
@@ -1285,11 +1287,26 @@ function buildDiffAwareFindings(file) {
     return [];
   }
 
-  const severity = addedHighRiskCalls.length > 0 ? "high" : "medium";
+  const surface = applyMappedSurfaceMetadata(classifyChangedFile(file), file.agentMap);
+  const actionability = actionabilityForDiffFinding({ surface, addedHighRiskCalls, removedSaferCalls });
+  const actionabilityReason = actionabilityReasonForDiffFinding({ surface, actionability });
+  const severity = ACTIONABILITY_TO_SEVERITY[actionability];
+  const lowPriority = actionability === "context_only" || actionability === "likely_noise";
   const evidence = [
-    ...addedHighRiskCalls.map((call) => `added high-risk call: ${call}`),
+    ...addedHighRiskCalls.map((call) => lowPriority ? `action-like call in low-priority surface: ${call}` : `added high-risk call: ${call}`),
     ...removedSaferCalls.map((call) => `removed safer call: ${call}`)
   ];
+  const title = lowPriority
+    ? "Agent-related vocabulary in a low-priority surface"
+    : addedHighRiskCalls.length > 0
+      ? "High-risk agent behavior added"
+      : "Agent behavior guardrail changed";
+  const reason = lowPriority
+    ? `This diff contains action-like calls in a ${surface.reachability_provenance} surface. It remains visible for context but is not urgent runtime agent behavior by default.`
+    : reasonForDiffAwareFinding({ addedHighRiskCalls, removedSaferCalls });
+  const recommendation = lowPriority
+    ? "No action is required by default. Review only if this path is used as runtime agent input or configure it explicitly as an entrypoint."
+    : "Review before merge. Add confirmation, policy checks, or an approval scenario if this behavior is intended.";
 
   return [
     {
@@ -1297,7 +1314,9 @@ function buildDiffAwareFindings(file) {
       finding_type: "behavior_surface_change",
       path: file.filePath,
       severity,
-      title: addedHighRiskCalls.length > 0 ? "High-risk agent behavior added" : "Agent behavior guardrail changed",
+      actionability,
+      actionability_reason: actionabilityReason,
+      title,
       added_calls: calls.added_calls,
       removed_calls: calls.removed_calls,
       added_high_risk_calls: addedHighRiskCalls,
@@ -1307,14 +1326,45 @@ function buildDiffAwareFindings(file) {
         finding_type: "behavior_surface_change",
         path: file.filePath,
         severity,
+        actionability,
+        actionability_reason: actionabilityReason,
         added_high_risk_calls: addedHighRiskCalls,
         removed_safer_calls: removedSaferCalls,
         evidence
       }),
-      reason: reasonForDiffAwareFinding({ addedHighRiskCalls, removedSaferCalls }),
-      recommendation: "Review before merge. Add confirmation, policy checks, or an approval scenario if this behavior is intended."
+      reason,
+      recommendation
     }
   ];
+}
+
+function actionabilityForDiffFinding({ surface, addedHighRiskCalls, removedSaferCalls }) {
+  if (
+    addedHighRiskCalls.length > 0 &&
+    surface.reachability_provenance === "runtime" &&
+    surface.label !== "not_agent_related"
+  ) {
+    return "action_required";
+  }
+
+  if (
+    removedSaferCalls.length > 0 &&
+    surface.reachability_provenance === "runtime" &&
+    surface.label !== "not_agent_related" &&
+    ["context_only", "likely_noise"].includes(surface.actionability)
+  ) {
+    return "review_recommended";
+  }
+
+  return surface.actionability ?? "context_only";
+}
+
+function actionabilityReasonForDiffFinding({ surface, actionability }) {
+  if (actionability === surface.actionability) return surface.actionability_reason;
+  if (actionability === "action_required") {
+    return "runtime_diff_execution_context: runtime agent diff adds concrete state-mutating or external-side-effect calls";
+  }
+  return "runtime_guardrail_change: runtime agent behavior removed escalation, review, confirmation, or validation behavior";
 }
 
 function extractCallsFromCodeLine(line) {

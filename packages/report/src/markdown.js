@@ -403,7 +403,7 @@ function renderClassificationFinding(lines, finding, index, actionability) {
   lines.push(`actionability: ${finding.actionability ?? actionability}`);
 
   if (isDiffAwareFinding(finding)) {
-    renderDiffAwareFinding(lines, finding);
+    renderDiffAwareFinding(lines, finding, finding.actionability ?? actionability);
   } else {
     renderMapDriftFinding(lines, finding);
   }
@@ -419,11 +419,12 @@ function isDiffAwareFinding(finding) {
   return Array.isArray(finding.added_calls) || Array.isArray(finding.removed_calls);
 }
 
-function renderDiffAwareFinding(lines, finding) {
+function renderDiffAwareFinding(lines, finding, actionability) {
+  const emphasizeRisk = actionability === "action_required" || actionability === "review_recommended";
   lines.push("");
   lines.push("added calls:");
   for (const call of finding.added_calls ?? []) {
-    const suffix = (finding.added_high_risk_calls ?? []).includes(call) ? " (high-risk)" : "";
+    const suffix = emphasizeRisk && (finding.added_high_risk_calls ?? []).includes(call) ? " (high-risk)" : "";
     lines.push(`- ${call}${suffix}`);
   }
   if ((finding.added_calls ?? []).length === 0) lines.push("- none");
