@@ -267,6 +267,5 @@ Experimental live adapters exist for Codex CLI, Claude Agent SDK, and OpenRouter
 
 ## Near-Term Roadmap
 
-1. Field-level state policy controls beyond exact-value expectations.
-2. Broader deterministic scenario templates beyond confirmation and must-not-call checks.
-3. More precise resolver support for complex TS/package layouts.
+1. Broader deterministic scenario templates beyond confirmation and must-not-call checks.
+2. More precise resolver support for complex TS/package layouts.

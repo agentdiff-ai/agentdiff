@@ -32,6 +32,8 @@ assert.deepEqual(SUPPORTED_EXPECTATION_TYPES, [
   "must_not_call",
   "requires_confirmation",
   "state_field_must_equal",
+  "state_field_must_change",
+  "state_field_must_not_change",
   "must_change_file",
   "must_not_change_file",
   "tests_must_pass"

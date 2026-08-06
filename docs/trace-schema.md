@@ -24,6 +24,8 @@ When both traces include state snapshots, Agentdiff compares each run's `state_b
 
 Consequential paths such as status, refunds, balances, payments, ownership, permissions, memory, checkpoints, tickets, and accounts are `action_required`. Other durable-state differences remain visible as review warnings. This is structural JSON comparison supplied by the harness; Agentdiff does not infer whether a harness captured every external state change.
 
+Scenarios can enforce field-level intent with `state_field_must_equal`, `state_field_must_change`, and `state_field_must_not_change` expectations.
+
 ## Tool Calls
 
 ```ts
