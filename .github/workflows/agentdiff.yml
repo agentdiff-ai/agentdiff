@@ -41,7 +41,7 @@ jobs:
         if: always()
         with:
           name: agentdiff-report
-          path: .agentdiff/runs/latest
+          path: .agentdiff/runs
 
   recorded-harness:
     if: ${{ contains(github.head_ref || '', 'coding-agent-edits-test') }}
