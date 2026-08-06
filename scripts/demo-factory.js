@@ -71,6 +71,37 @@ export function buildSrt(shots) {
     .join("\n")}\n`;
 }
 
+export function buildVoiceoverGuide(units) {
+  let cursor = 0;
+  const rows = units.map((unit, index) => {
+    const start = cursor;
+    const end = cursor + Number(unit.durationSeconds);
+    cursor = end;
+    return [
+      `## ${index + 1}. ${unit.id}`,
+      "",
+      `Time: ${formatClock(start)}-${formatClock(end)} (${unit.durationSeconds}s)`,
+      `Segment file: voiceover-human-segments/${unit.id}.wav`,
+      "",
+      unit.voiceover,
+      ""
+    ].join("\n");
+  });
+  return `${[
+    "# Demo Voiceover Recording Guide",
+    "",
+    "Record each scene as a separate WAV for deterministic alignment. Leave natural silence at the end of a short line; the factory pads each segment to its scene boundary.",
+    "",
+    "Alternative: provide one fully timed voiceover-human.wav whose duration matches the complete cut within 0.5 seconds.",
+    "",
+    ...rows
+  ].join("\n")}\n`;
+}
+
+export function isHumanVoiceoverStatus(status) {
+  return status?.sourceType === "human_segments" || status?.sourceType === "human_mix";
+}
+
 export function formatSrtTimestamp(seconds) {
   const whole = Math.floor(seconds);
   const millis = Math.round((seconds - whole) * 1000);
@@ -78,6 +109,13 @@ export function formatSrtTimestamp(seconds) {
   const mm = String(Math.floor((whole % 3600) / 60)).padStart(2, "0");
   const ss = String(whole % 60).padStart(2, "0");
   return `${hh}:${mm}:${ss},${String(millis).padStart(3, "0")}`;
+}
+
+function formatClock(seconds) {
+  const whole = Math.floor(seconds);
+  const mm = String(Math.floor(whole / 60)).padStart(2, "0");
+  const ss = String(whole % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
 }
 
 function parseArgs(argv) {
@@ -146,8 +184,10 @@ function demoPaths(spec) {
     qualityReport: path.join(final, "quality-report.md"),
     subtitles: path.join(final, "subtitles.srt"),
     voiceoverText: path.join(final, "voiceover.txt"),
+    voiceoverGuide: path.join(final, "voiceover-recording-guide.md"),
     voiceoverWav: path.join(final, "voiceover.wav"),
     humanVoiceoverWav: path.join(final, "voiceover-human.wav"),
+    humanVoiceoverSegments: path.join(final, "voiceover-human-segments"),
     finalMp4: path.join(final, spec.outputFile),
     previewFrames: path.join(final, "preview-frames"),
     designed: path.join(root, "designed"),
@@ -249,6 +289,7 @@ function renderDemo(spec, paths) {
   const units = getRenderUnits(spec);
   const voiceoverText = units.map((unit) => unit.voiceover).join("\n\n");
   fs.writeFileSync(paths.voiceoverText, `${voiceoverText}\n`);
+  fs.writeFileSync(paths.voiceoverGuide, buildVoiceoverGuide(units));
   fs.writeFileSync(paths.subtitles, buildSrt(units));
 
   const audio = generateVoiceover(spec, paths, ffmpeg, units);
@@ -351,8 +392,8 @@ function checkDemo(spec, paths) {
     }
     if (!audio && voiceoverStatus.ok !== false) failures.push("missing audio stream");
     if (!audio && voiceoverStatus.ok === false) warnings.push(`captions-only fallback: ${voiceoverStatus.reason}`);
-    if (audio && spec.voice?.requireHumanForFinal && voiceoverStatus.voice !== "human") {
-      warnings.push(`synthetic voiceover placeholder; add ${paths.humanVoiceoverWav} before distribution`);
+    if (audio && spec.voice?.requireHumanForFinal && !isHumanVoiceoverStatus(voiceoverStatus)) {
+      warnings.push(`synthetic voiceover placeholder; add ${paths.humanVoiceoverWav} or aligned scene WAVs under ${paths.humanVoiceoverSegments} before distribution`);
     }
     if (!fs.existsSync(paths.subtitles) || fs.statSync(paths.subtitles).size === 0) failures.push("missing external subtitles.srt");
     if (subtitleStreams.length > 0) failures.push("embedded subtitle stream may duplicate visual lower thirds");
@@ -377,14 +418,43 @@ function checkDemo(spec, paths) {
 function generateVoiceover(spec, paths, ffmpeg, units = getRenderUnits(spec)) {
   const statusPath = path.join(paths.final, "voiceover-status.json");
   const duration = totalDuration(spec);
+  const humanSegments = units.map((unit) => path.join(paths.humanVoiceoverSegments, `${unit.id}.wav`));
+  const existingHumanSegments = humanSegments.filter((file) => fs.existsSync(file));
+  if (existingHumanSegments.length > 0 && existingHumanSegments.length !== humanSegments.length) {
+    const missing = units.filter((_, index) => !fs.existsSync(humanSegments[index])).map((unit) => `${unit.id}.wav`);
+    throw new Error(`Human voiceover segments are incomplete. Missing: ${missing.join(", ")}`);
+  }
+  if (existingHumanSegments.length === humanSegments.length) {
+    const preparedDir = path.join(paths.final, "voiceover-human-prepared");
+    fs.rmSync(preparedDir, { recursive: true, force: true });
+    fs.mkdirSync(preparedDir, { recursive: true });
+    const prepared = humanSegments.map((file, index) => {
+      const unit = units[index];
+      const inputDuration = probeAudioDuration(file);
+      if (inputDuration > Number(unit.durationSeconds) + 0.1) {
+        throw new Error(`Human segment ${path.basename(file)} is ${inputDuration.toFixed(2)}s but scene ${unit.id} allows ${unit.durationSeconds}s`);
+      }
+      const output = path.join(preparedDir, `${unit.id}.wav`);
+      run(ffmpeg, ["-y", "-i", file, "-af", "apad", "-t", String(unit.durationSeconds), "-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le", output], `prepare human segment ${unit.id}`);
+      return output;
+    });
+    concatVoiceoverSegments(prepared, preparedDir, paths.voiceoverWav, ffmpeg);
+    const status = { ok: true, voice: "human", sourceType: "human_segments", source: paths.humanVoiceoverSegments, segments: prepared.length };
+    fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
+    return status;
+  }
   if (fs.existsSync(paths.humanVoiceoverWav)) {
+    const inputDuration = probeAudioDuration(paths.humanVoiceoverWav);
+    if (Math.abs(inputDuration - duration) > 0.5) {
+      throw new Error(`Human voiceover mix is ${inputDuration.toFixed(2)}s; expected ${duration.toFixed(2)}s (+/- 0.5s). Use the per-scene recording guide to avoid timing drift.`);
+    }
     run(ffmpeg, ["-y", "-i", paths.humanVoiceoverWav, "-af", "apad", "-t", String(duration), "-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le", paths.voiceoverWav], "prepare human voiceover");
-    const status = { ok: true, voice: "human", source: paths.humanVoiceoverWav, segments: 1 };
+    const status = { ok: true, voice: "human", sourceType: "human_mix", source: paths.humanVoiceoverWav, inputDuration, segments: 1 };
     fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
     return status;
   }
   if (process.platform !== "win32") {
-    const status = { ok: false, reason: "Windows SAPI is only available on Windows" };
+    const status = { ok: false, sourceType: "captions_only", reason: "Windows SAPI is only available on Windows" };
     fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
     return status;
   }
@@ -432,12 +502,25 @@ $synth.Dispose()
     ], `pad voiceover segment ${unit.id}`);
     generated.push(paddedWav);
   }
-  const concatPath = path.join(segmentDir, "voiceover-clips.txt");
-  fs.writeFileSync(concatPath, generated.map((file) => `file '${ffmpegPath(file)}'`).join("\n"));
-  run(ffmpeg, ["-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c:a", "pcm_s16le", paths.voiceoverWav], "concat voiceover segments");
-  const status = { ok: true, voice, segments: generated.length };
+  concatVoiceoverSegments(generated, segmentDir, paths.voiceoverWav, ffmpeg);
+  const status = { ok: true, voice, sourceType: "synthetic_placeholder", segments: generated.length };
   fs.writeFileSync(statusPath, `${JSON.stringify(status, null, 2)}\n`);
   return status;
+}
+
+function concatVoiceoverSegments(files, directory, output, ffmpeg) {
+  const concatPath = path.join(directory, "voiceover-clips.txt");
+  fs.writeFileSync(concatPath, files.map((file) => `file '${ffmpegPath(file)}'`).join("\n"));
+  run(ffmpeg, ["-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c:a", "pcm_s16le", output], "concat voiceover segments");
+}
+
+function probeAudioDuration(file) {
+  const ffprobe = findCommand("ffprobe");
+  if (!ffprobe) throw new Error("ffprobe was not found.");
+  const result = run(ffprobe, ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file], `probe audio ${path.basename(file)}`);
+  const duration = Number(result.stdout.trim());
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error(`Could not determine audio duration for ${file}`);
+  return duration;
 }
 
 function readVoiceoverStatus(paths) {
@@ -480,6 +563,7 @@ function renderPlan(spec, paths, audio) {
     `Resolution: ${spec.video.width}x${spec.video.height}`,
     `Duration target: ${totalDuration(spec)} seconds`,
     `Audio: ${audio.ok ? `yes (${audio.voice})` : `no (${audio.reason})`}`,
+    `Recording guide: ${paths.voiceoverGuide}`,
     "",
     "## Render scenes",
     "",
@@ -496,7 +580,7 @@ function renderQualityReport(spec, paths, probe, failures, warnings, voiceoverSt
   const video = probe?.streams?.find((stream) => stream.codec_type === "video");
   const audio = probe?.streams?.find((stream) => stream.codec_type === "audio");
   const subtitles = probe?.streams?.filter((stream) => stream.codec_type === "subtitle") ?? [];
-  const distributionReady = failures.length === 0 && (!spec.voice?.requireHumanForFinal || voiceoverStatus?.voice === "human");
+  const distributionReady = failures.length === 0 && (!spec.voice?.requireHumanForFinal || isHumanVoiceoverStatus(voiceoverStatus));
   return `${[
     "# Demo Factory Quality Report",
     "",
@@ -507,7 +591,7 @@ function renderQualityReport(spec, paths, probe, failures, warnings, voiceoverSt
     `Resolution: ${video ? `${video.width}x${video.height}` : "missing"}`,
     `Video stream: ${video ? "yes" : "no"}`,
     `Audio stream: ${audio ? "yes" : "no"}`,
-    `Audio source: ${voiceoverStatus?.voice ?? "none"}`,
+    `Audio source: ${voiceoverStatus?.sourceType ?? voiceoverStatus?.voice ?? "none"}`,
     `Distribution ready: ${distributionReady ? "yes" : "no"}`,
     `Subtitle streams: ${subtitles.length} (external SRT: ${fs.existsSync(paths.subtitles) ? "ready" : "missing"})`,
     `Preview frames: ${paths.previewFrames}`,
