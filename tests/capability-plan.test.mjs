@@ -23,6 +23,7 @@ function executionProvenance(overrides = {}) {
   return {
     schema_version: "0.1",
     git_revision: expectedRevision,
+    worktree_dirty: false,
     harness_id: "test-harness",
     verified: true,
     verification_errors: [],
@@ -163,6 +164,17 @@ const unapprovedHarness = buildCapabilityPlan({
 assert.equal(unapprovedHarness.decision, "block");
 assert.deepEqual(unapprovedHarness.capability_changes[0].coverage.unapproved_harness_scenarios, ["refund_requires_human_approval"]);
 
+const dirtyWorktree = buildCapabilityPlan({
+  classificationReport,
+  policy,
+  scenarios: [scenario],
+  runReports: [{ ...passingRunReport, execution_provenance: executionProvenance({ worktree_dirty: true }) }],
+  expectedRevision
+});
+assert.equal(dirtyWorktree.decision, "block");
+assert.deepEqual(dirtyWorktree.capability_changes[0].coverage.dirty_worktree_scenarios, ["refund_requires_human_approval"]);
+assert.deepEqual(dirtyWorktree.capability_changes[0].coverage.execution_evidence[0].rejection_reasons, ["worktree_not_clean"]);
+
 const unverifiedArtifacts = buildCapabilityPlan({
   classificationReport,
   policy,
@@ -234,14 +246,20 @@ try {
   fs.mkdirSync(path.join(tempRoot, ".agentdiff", "traces"), { recursive: true });
   const safeTrace = JSON.stringify({ scenario_id: "refund_requires_human_approval", tool_calls: [], state_after: {} }, null, 2);
   fs.writeFileSync(path.join(tempRoot, ".agentdiff", "traces", "base.json"), safeTrace);
-  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "traces", "head.json"), safeTrace);
+  const harnessSource = [
+    'export const harnessId = "test-harness";',
+    "export async function runScenario({ scenario }) {",
+    "  return { scenario_id: scenario.id, tool_calls: [], state_after: {} };",
+    "}",
+    ""
+  ].join("\n");
+  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "harness.js"), harnessSource);
   const evidenceRun = spawnSync(process.execPath, [
     cli,
     "run",
     "--base", ".agentdiff/traces/base.json",
-    "--head", ".agentdiff/traces/head.json",
+    "--harness-module", ".agentdiff/harness.js",
     "--scenario", ".agentdiff/scenarios/refund.json",
-    "--harness-id", "test-harness",
     "--out", ".agentdiff/evidence"
   ], { cwd: tempRoot, encoding: "utf8" });
   assert.equal(evidenceRun.status, 0, evidenceRun.stderr);
@@ -252,7 +270,9 @@ try {
   const reportPath = path.join(tempRoot, ".agentdiff", "runs", "latest", "report.json");
   assert.equal(JSON.parse(fs.readFileSync(reportPath, "utf8")).decision, "review");
 
-  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "traces", "head.json"), `${safeTrace}\n`);
+  const generatedHeadPath = path.join(tempRoot, ".agentdiff", "evidence", "generated-head-trace.json");
+  const generatedHeadTrace = fs.readFileSync(generatedHeadPath, "utf8");
+  fs.writeFileSync(generatedHeadPath, `${generatedHeadTrace}\n`);
   const tampered = spawnSync(process.execPath, [cli, "plan", "--base", base, "--head", head, "--run-reports", ".agentdiff/evidence", "--out", ".agentdiff/tampered-plan"], {
     cwd: tempRoot,
     encoding: "utf8"
@@ -260,7 +280,17 @@ try {
   assert.equal(tampered.status, 1, tampered.stderr);
   const tamperedReport = JSON.parse(fs.readFileSync(path.join(tempRoot, ".agentdiff", "tampered-plan", "report.json"), "utf8"));
   assert.deepEqual(tamperedReport.capability_changes[0].coverage.unverified_artifact_scenarios, ["refund_requires_human_approval"]);
-  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "traces", "head.json"), safeTrace);
+  fs.writeFileSync(generatedHeadPath, generatedHeadTrace);
+
+  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "harness.js"), `${harnessSource}// tampered\n`);
+  const tamperedHarness = spawnSync(process.execPath, [cli, "plan", "--base", base, "--head", head, "--run-reports", ".agentdiff/evidence", "--out", ".agentdiff/tampered-harness-plan"], {
+    cwd: tempRoot,
+    encoding: "utf8"
+  });
+  assert.equal(tamperedHarness.status, 1, tamperedHarness.stderr);
+  const tamperedHarnessReport = JSON.parse(fs.readFileSync(path.join(tempRoot, ".agentdiff", "tampered-harness-plan", "report.json"), "utf8"));
+  assert.deepEqual(tamperedHarnessReport.capability_changes[0].coverage.unverified_artifact_scenarios, ["refund_requires_human_approval"]);
+  fs.writeFileSync(path.join(tempRoot, ".agentdiff", "harness.js"), harnessSource);
 
   const actionRun = spawnSync(process.execPath, [action], {
     cwd: tempRoot,

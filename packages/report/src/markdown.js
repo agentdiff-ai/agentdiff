@@ -20,6 +20,7 @@ export function renderMarkdownReport(report) {
   }
   if (report.execution_provenance) {
     lines.push(`git revision: ${report.execution_provenance.git_revision ? shortRevision(report.execution_provenance.git_revision) : "unavailable"}`);
+    lines.push(`tracked worktree clean: ${report.execution_provenance.worktree_dirty === false ? "yes" : "no"}`);
     lines.push(`harness: ${report.execution_provenance.harness_id ?? "unidentified"}`);
     lines.push(`artifact hashes recorded: ${Object.keys(report.execution_provenance.artifacts ?? {}).join(", ") || "none"}`);
   }
@@ -188,12 +189,14 @@ function renderCapabilityChange(lines, change) {
     lines.push(`- failing: ${change.coverage.failing_scenarios.join(", ") || "none"}`);
     lines.push(`- invalid run evidence: ${change.coverage.invalid_execution_scenarios.join(", ") || "none"}`);
     lines.push(`- stale revision evidence: ${change.coverage.stale_execution_scenarios.join(", ") || "none"}`);
+    lines.push(`- dirty worktree evidence: ${change.coverage.dirty_worktree_scenarios.join(", ") || "none"}`);
     lines.push(`- unapproved harness evidence: ${change.coverage.unapproved_harness_scenarios.join(", ") || "none"}`);
     lines.push(`- unverified artifact evidence: ${change.coverage.unverified_artifact_scenarios.join(", ") || "none"}`);
     lines.push(`- missing run evidence: ${change.coverage.missing_execution_scenarios.join(", ") || "none"}`);
     for (const evidence of change.coverage.execution_evidence ?? []) {
       lines.push(`- run evidence: ${evidence.scenario_id}=${evidence.status}, eligible=${evidence.eligible ? "yes" : "no"}${evidence.source_path ? ` (${evidence.source_path})` : ""}`);
       lines.push(`  - revision: ${evidence.git_revision ? shortRevision(evidence.git_revision) : "missing"}`);
+      lines.push(`  - tracked worktree clean: ${evidence.worktree_clean ? "yes" : "no"}`);
       lines.push(`  - harness: ${evidence.harness_id ?? "missing"}`);
       lines.push(`  - artifact hashes verified: ${evidence.artifacts_verified ? "yes" : "no"}`);
       for (const reason of evidence.rejection_reasons ?? []) lines.push(`  - rejected: ${reason}`);

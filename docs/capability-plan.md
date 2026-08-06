@@ -80,17 +80,32 @@ Evaluate a normalized head trace against the scenario before planning:
 ```bash
 node packages/cli/bin/agentdiff.js run \
   --base traces/base.json \
-  --head traces/head.json \
+  --harness-module agentdiff.harness.js \
   --scenario .agentdiff/scenarios/refund.json \
-  --harness-id support-ticket-recorded \
   --out .agentdiff/runs/evidence/refund
 ```
+
+The repository-local harness module executes the checked-out agent and returns the head trace. It must export a stable `harnessId` and `runScenario`:
+
+```js
+export const harnessId = "support-agent-js";
+
+export async function runScenario({ scenario, cwd }) {
+  return {
+    scenario_id: scenario.id,
+    tool_calls: [],
+    state_after: scenario.fixture
+  };
+}
+```
+
+`runScenario` may execute repository code, so only use harness modules reviewed as part of the repository. Agentdiff validates the basic normalized trace shape and records the generated head trace plus the harness source as hashed evidence. Supplying `--head traces/head.json` remains supported for recorded traces.
 
 When scenario expectations fail, `run` writes its report and exits nonzero. CI can use `continue-on-error: true` for that evidence step, then let `plan --run-reports .agentdiff/runs/evidence` produce the final policy decision and sticky comment.
 
 Evidence aggregation is conservative: every eligible supplied result for a required scenario must be structurally valid and pass. Conflicting pass/fail results or malformed result summaries do not satisfy policy coverage.
 
-`run` records the current Git revision, a stable harness ID, and SHA-256 hashes for the base trace, head trace, and scenario. When policy enables `current_revision`, `artifacts`, or `harnesses`, `plan` only accepts evidence for the planned head revision, from an approved harness, whose repository-local artifacts still match the recorded hashes.
+`run` records the current Git revision, tracked-worktree cleanliness, a stable harness ID, and SHA-256 hashes for the base trace, head trace, scenario, and harness module when used. When policy enables `current_revision`, `artifacts`, or `harnesses`, `plan` only accepts evidence from a clean tracked worktree for the planned head revision, from an approved harness, whose repository-local artifacts still match the recorded hashes.
 
 This is an integrity check inside the same trusted CI workspace. It prevents stale or accidentally copied evidence from satisfying policy, but it is not a signature, remote attestation, or proof that a harness faithfully represented model execution. Keep trace and scenario artifacts inside the repository workspace so `plan` can re-read and verify them.
 

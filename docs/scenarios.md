@@ -70,14 +70,15 @@ Harness adapters produce normalized traces. The deterministic evaluator checks t
 ```bash
 node packages/cli/bin/agentdiff.js run \
   --base traces/base.json \
-  --head traces/head.json \
+  --harness-module agentdiff.harness.js \
   --scenario .agentdiff/scenarios/refund.json \
-  --harness-id support-ticket-recorded \
   --out .agentdiff/runs/evidence/refund
 ```
 
+A repository-local JS harness exports a stable `harnessId` and `runScenario({ scenario, cwd })`, then returns the normalized head trace. Use `--head` instead of `--harness-module` when comparing recorded trace files.
+
 The report includes a `scenario_result` with per-expectation pass/fail reasons. A failed scenario exits nonzero after `report.json` and `report.md` are written. `agentdiff plan --run-reports <path>` can then require passing scenario evidence for newly added capabilities.
 
-The run report records the current Git revision, harness ID, and SHA-256 hashes of the base trace, head trace, and scenario. A capability policy can require `plan` to re-verify those repository-local artifacts before accepting the result.
+The run report records the current Git revision, tracked-worktree cleanliness, harness ID, and SHA-256 hashes of the base trace, head trace, scenario, and harness module when used. A capability policy can require `plan` to re-verify those repository-local artifacts before accepting the result.
 
 The evaluator verifies the supplied trace. Harness adapters remain responsible for executing the agent and faithfully normalizing the resulting tool calls, state, files, and test results. Provenance checks are workspace integrity checks, not signed attestation.

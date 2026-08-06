@@ -31,6 +31,9 @@ inputs:
   harness-id:
     description: "Stable harness identity recorded in run provenance."
     required: false
+  harness-module:
+    description: "Repository-local JS module exporting harnessId and runScenario for run mode."
+    required: false
   example:
     description: "Example name for run mode, such as coding-agent-harness."
     required: false

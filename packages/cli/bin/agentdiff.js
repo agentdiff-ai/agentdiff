@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import {
   analyzeTracePair,
   buildAgentMap,
@@ -112,13 +113,17 @@ async function main(argv) {
     }
 
     const base = readRequiredOption(argv, "--base");
-    const head = readRequiredOption(argv, "--head");
+    const head = readOption(argv, "--head");
+    const harnessModule = readOption(argv, "--harness-module");
+    if (head && harnessModule) throw new Error("run accepts either --head or --harness-module, not both");
+    if (!head && !harnessModule) throw new Error("run needs either --head <trace.json> or --harness-module <module.js>");
     await run({
       base,
       head,
       out,
       scenarioPath: readOption(argv, "--scenario"),
-      harnessId: readOption(argv, "--harness-id") ?? process.env.AGENTDIFF_HARNESS_ID ?? "recorded-trace"
+      harnessId: readOption(argv, "--harness-id") ?? process.env.AGENTDIFF_HARNESS_ID,
+      harnessModule
     });
     return;
   }
@@ -164,19 +169,38 @@ async function init({ force, githubAction }) {
   console.log("tip: suppressions require reason and expires; suppressed findings stay visible in reports.");
 }
 
-async function run({ base, head, out, scenarioPath, harnessId }) {
+async function run({ base, head, out, scenarioPath, harnessId, harnessModule }) {
   const basePath = path.resolve(process.cwd(), base);
-  const headPath = path.resolve(process.cwd(), head);
   const outDir = path.resolve(process.cwd(), out);
+  const scenario = scenarioPath ? loadScenarioFile(path.resolve(process.cwd(), scenarioPath)) : null;
+  fs.mkdirSync(outDir, { recursive: true });
+
+  let resolvedHarnessId = harnessId ?? "recorded-trace";
+  let harnessModulePath = null;
+  let headPath;
+  if (harnessModule) {
+    if (!scenario) throw new Error("run --harness-module requires --scenario <scenario.json>");
+    harnessModulePath = path.resolve(process.cwd(), harnessModule);
+    const harnessResult = await executeHarnessModule({ harnessModulePath, scenario, harnessId });
+    resolvedHarnessId = harnessResult.harnessId;
+    headPath = path.join(outDir, "generated-head-trace.json");
+    fs.writeFileSync(headPath, `${JSON.stringify(harnessResult.trace, null, 2)}\n`);
+  } else {
+    headPath = path.resolve(process.cwd(), head);
+  }
 
   const baseTrace = readJson(basePath);
   const headTrace = readJson(headPath);
-  const scenario = scenarioPath ? loadScenarioFile(path.resolve(process.cwd(), scenarioPath)) : null;
-  const executionProvenance = buildExecutionProvenance({ basePath, headPath, scenarioPath, harnessId });
+  const executionProvenance = buildExecutionProvenance({
+    basePath,
+    headPath,
+    scenarioPath,
+    harnessId: resolvedHarnessId,
+    harnessModulePath
+  });
   const report = analyzeTracePair({ baseTrace, headTrace, scenario, executionProvenance });
   const markdown = renderMarkdownReport(report);
 
-  fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   fs.writeFileSync(path.join(outDir, "report.md"), `${markdown}\n`);
 
@@ -188,6 +212,42 @@ async function run({ base, head, out, scenarioPath, harnessId }) {
   }
   console.log(`report: ${path.join(outDir, "report.md")}`);
   if (report.scenario_result?.status === "fail") process.exitCode = 1;
+}
+
+async function executeHarnessModule({ harnessModulePath, scenario, harnessId }) {
+  if (!fs.existsSync(harnessModulePath) || !fs.statSync(harnessModulePath).isFile()) {
+    throw new Error(`harness module not found: ${harnessModulePath}`);
+  }
+
+  const module = await import(pathToFileURL(harnessModulePath).href);
+  const harness = module.default && typeof module.default === "object" ? module.default : module;
+  const runScenario = module.runScenario ?? harness.runScenario;
+  if (typeof runScenario !== "function") {
+    throw new Error("harness module must export async function runScenario({ scenario, cwd })");
+  }
+  const resolvedHarnessId = harnessId ?? module.harnessId ?? harness.harnessId;
+  if (typeof resolvedHarnessId !== "string" || resolvedHarnessId.trim() === "") {
+    throw new Error("harness module must export a non-empty harnessId or run must receive --harness-id");
+  }
+
+  const trace = await runScenario({ scenario: structuredClone(scenario), cwd: process.cwd() });
+  validateHarnessTrace(trace, scenario.id);
+  return { harnessId: resolvedHarnessId.trim(), trace };
+}
+
+function validateHarnessTrace(trace, scenarioId) {
+  if (!trace || typeof trace !== "object" || Array.isArray(trace)) throw new Error("harness runScenario must return a trace object");
+  if (trace.scenario_id !== scenarioId) {
+    throw new Error(`harness trace scenario_id ${trace.scenario_id ?? "missing"} does not match ${scenarioId}`);
+  }
+  for (const field of ["tool_calls", "files_changed", "tests_run", "commands_run", "model_calls"]) {
+    if (trace[field] !== undefined && !Array.isArray(trace[field])) throw new Error(`harness trace ${field} must be an array`);
+  }
+  for (const field of ["state_before", "state_after"]) {
+    if (trace[field] !== undefined && (!trace[field] || typeof trace[field] !== "object" || Array.isArray(trace[field]))) {
+      throw new Error(`harness trace ${field} must be an object`);
+    }
+  }
 }
 
 function validateScenarioCommand(scenarioPath) {
@@ -260,16 +320,18 @@ async function plan({ files, out, policyPath, scenariosPath, runReportsPath, exp
   if (report.decision === "block") process.exitCode = 1;
 }
 
-function buildExecutionProvenance({ basePath, headPath, scenarioPath, harnessId }) {
+function buildExecutionProvenance({ basePath, headPath, scenarioPath, harnessId, harnessModulePath }) {
   const artifacts = {
     base_trace: artifactDescriptor(basePath),
     head_trace: artifactDescriptor(headPath)
   };
   if (scenarioPath) artifacts.scenario = artifactDescriptor(path.resolve(process.cwd(), scenarioPath));
+  if (harnessModulePath) artifacts.harness_module = artifactDescriptor(harnessModulePath);
 
   return {
     schema_version: "0.1",
     git_revision: resolveGitRevision("HEAD"),
+    worktree_dirty: isGitWorktreeDirty(),
     harness_id: harnessId || "recorded-trace",
     generated_at: new Date().toISOString(),
     artifacts
@@ -300,6 +362,10 @@ function sha256File(filePath) {
 
 function resolveGitRevision(ref) {
   return readGitOutput(["rev-parse", ref]) || null;
+}
+
+function isGitWorktreeDirty() {
+  return readGitOutput(["status", "--porcelain", "--untracked-files=no"]) !== "";
 }
 
 function buildClassificationForInputs(files) {
@@ -401,8 +467,9 @@ function verifyExecutionArtifacts(provenance) {
   const root = path.resolve(process.cwd());
   const artifacts = provenance.artifacts && typeof provenance.artifacts === "object" ? provenance.artifacts : {};
   const required = ["base_trace", "head_trace", "scenario"];
+  const artifactNames = [...new Set([...required, ...Object.keys(artifacts)])];
 
-  for (const name of required) {
+  for (const name of artifactNames) {
     const artifact = artifacts[name];
     if (!artifact?.path || !artifact?.sha256) {
       errors.push(`${name} hash metadata is missing`);
@@ -431,6 +498,7 @@ function verifyExecutionArtifacts(provenance) {
 
   return {
     ...provenance,
+    worktree_dirty: provenance.worktree_dirty !== false || isGitWorktreeDirty(),
     verified: errors.length === 0,
     verification_errors: errors
   };
@@ -1656,7 +1724,7 @@ Commands:
   agentdiff demo
     Run the support-ticket regression demo.
 
-  agentdiff run --base <trace.json> --head <trace.json> [--scenario <scenario.json>] [--harness-id <id>] [--out <dir>]
+  agentdiff run --base <trace.json> (--head <trace.json> | --harness-module <module.js>) [--scenario <scenario.json>] [--harness-id <id>] [--out <dir>]
     Compare base/head normalized traces and write report.json + report.md.
 
   agentdiff run --example coding-agent-harness --recorded [--out <dir>]

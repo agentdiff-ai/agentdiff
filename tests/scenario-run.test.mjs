@@ -59,6 +59,7 @@ assert.throws(
 
 const repoRoot = process.cwd();
 const cli = path.join(repoRoot, "packages", "cli", "bin", "agentdiff.js");
+const action = path.join(repoRoot, "packages", "github-action", "index.js");
 const repoRevision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
 const outRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentdiff-scenario-run-test-"));
 try {
@@ -79,6 +80,7 @@ try {
   assert.equal(passReport.scenario_result.status, "pass");
   assert.equal(passReport.status, "pass");
   assert.equal(passReport.execution_provenance.git_revision, repoRevision);
+  assert.equal(typeof passReport.execution_provenance.worktree_dirty, "boolean");
   assert.equal(passReport.execution_provenance.harness_id, "recorded-trace");
   assert.equal(passReport.execution_provenance.artifacts.base_trace.path, "examples/support-ticket-agent/traces/base.json");
   assert.equal(passReport.execution_provenance.artifacts.base_trace.repository_local, true);
@@ -92,6 +94,42 @@ try {
   assert.match(renderMarkdownReport(passReport), /harness: recorded-trace/);
   assert.match(renderMarkdownReport(passReport), /artifact hashes recorded: base_trace, head_trace, scenario/);
   assert.match(renderMarkdownReport(passReport), /No behavior regressions detected/);
+
+  const moduleOut = path.join(outRoot, "module");
+  const moduleRun = spawnSync(process.execPath, [
+    cli,
+    "run",
+    "--base", path.join(repoRoot, "examples", "support-ticket-agent", "traces", "base.json"),
+    "--harness-module", path.join(repoRoot, "examples", "demo-support-agent", "harness.js"),
+    "--scenario", path.join(repoRoot, "examples", "support-ticket-agent", "scenario.json"),
+    "--out", moduleOut
+  ], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(moduleRun.status, 0, moduleRun.stderr);
+  const moduleReport = JSON.parse(fs.readFileSync(path.join(moduleOut, "report.json"), "utf8"));
+  const generatedTrace = JSON.parse(fs.readFileSync(path.join(moduleOut, "generated-head-trace.json"), "utf8"));
+  assert.equal(moduleReport.status, "pass");
+  assert.equal(moduleReport.execution_provenance.harness_id, "demo-support-agent-js");
+  assert.equal(moduleReport.execution_provenance.artifacts.harness_module.path, "examples/demo-support-agent/harness.js");
+  assert.equal(moduleReport.execution_provenance.artifacts.harness_module.repository_local, true);
+  assert.match(moduleReport.execution_provenance.artifacts.harness_module.sha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(generatedTrace.tool_calls.map((call) => call.name), ["classify_ticket", "escalate_ticket"]);
+
+  const actionOut = path.join(outRoot, "action-module");
+  const actionModuleRun = spawnSync(process.execPath, [action], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GITHUB_WORKSPACE: repoRoot,
+      INPUT_COMMAND: "run",
+      INPUT_BASE: "examples/support-ticket-agent/traces/base.json",
+      INPUT_SCENARIO: "examples/support-ticket-agent/scenario.json",
+      "INPUT_HARNESS-MODULE": "examples/demo-support-agent/harness.js",
+      INPUT_OUT: actionOut
+    }
+  });
+  assert.equal(actionModuleRun.status, 0, actionModuleRun.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(actionOut, "report.json"), "utf8")).execution_provenance.harness_id, "demo-support-agent-js");
 
   const failRun = spawnSync(process.execPath, [...common, "--head", path.join(repoRoot, "examples", "support-ticket-agent", "traces", "head.json"), "--out", path.join(outRoot, "fail")], {
     cwd: repoRoot,
