@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  classify:
+  plan:
     if: ${{ !contains(github.head_ref || '', 'coding-agent-edits-test') }}
     runs-on: ubuntu-latest
     permissions:
@@ -20,7 +20,7 @@ jobs:
 
       - uses: ./
         with:
-          command: classify
+          command: plan
           base: origin/${{ github.base_ref || 'main' }}
           head: HEAD
           out: .agentdiff/runs/latest

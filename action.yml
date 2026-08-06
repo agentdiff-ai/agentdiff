@@ -3,18 +3,24 @@ description: CI for AI agent behavior changes
 
 inputs:
   command:
-    description: "Command to run. Supported now: classify, run, or demo."
+    description: "Command to run. Supported now: plan, classify, run, or demo."
     required: false
     default: classify
   base:
-    description: "Base git ref for classify mode."
+    description: "Base git ref for plan or classify mode."
     required: false
   head:
-    description: "Head git ref for classify mode."
+    description: "Head git ref for plan or classify mode."
     required: false
     default: HEAD
   files:
-    description: "Comma-separated file list for classify mode. If set, base/head are ignored."
+    description: "Comma-separated file list for plan or classify mode. If set, base/head are ignored."
+    required: false
+  policy:
+    description: "Capability policy path for plan mode. Defaults to agentdiff.policy.json."
+    required: false
+  scenarios:
+    description: "Scenario directory or JSON file for plan mode. Defaults to .agentdiff/scenarios."
     required: false
   example:
     description: "Example name for run mode, such as coding-agent-harness."

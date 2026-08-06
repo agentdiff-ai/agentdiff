@@ -36,6 +36,7 @@ try {
   const first = runInit(tempRoot);
   assert.equal(first.status, 0, first.stderr);
   assert.match(first.stdout, /created agentdiff\.yml/);
+  assert.match(first.stdout, /created agentdiff\.policy\.json/);
   assert.match(first.stdout, /LangGraph graph entrypoints: src\/agents\/graph\.ts/);
   assert.match(first.stdout, /package\.json workspaces: packages\/\*/);
   assert.match(first.stdout, /tsconfig\.json path aliases: @\/\*, @repo\/\*/);
@@ -54,6 +55,14 @@ try {
   assert.match(config, /live_openrouter:/);
   assert.ok(fs.existsSync(path.join(tempRoot, ".agentdiff", "map.json")));
   assert.ok(fs.existsSync(path.join(tempRoot, ".agentdiff", "scenarios", "starter.json")));
+  assert.ok(fs.existsSync(path.join(tempRoot, "agentdiff.policy.json")));
+  const starterScenario = JSON.parse(fs.readFileSync(path.join(tempRoot, ".agentdiff", "scenarios", "starter.json"), "utf8"));
+  assert.equal(starterScenario.schema_version, "0.1");
+  assert.equal(starterScenario.expectations[0].type, "must_not_call");
+  assert.equal(starterScenario.expectations[1].type, "requires_confirmation");
+  const starterPolicy = JSON.parse(fs.readFileSync(path.join(tempRoot, "agentdiff.policy.json"), "utf8"));
+  assert.equal(starterPolicy.defaults.unmatched, "review");
+  assert.equal(starterPolicy.rules[0].decision.uncovered, "block");
 
   const second = runInit(tempRoot);
   assert.notEqual(second.status, 0);
@@ -89,7 +98,7 @@ try {
   assert.match(workflow, /Recommended v0 channel/);
   assert.match(workflow, /Pin @v0\.1\.0 for an immutable exact version/);
   assert.match(workflow, /uses: agentdiff-ai\/agentdiff@v0/);
-  assert.match(workflow, /command: classify/);
+  assert.match(workflow, /command: plan/);
   assert.match(workflow, /base: origin\/\$\{\{ github\.base_ref \}\}/);
   assert.match(workflow, /head: HEAD/);
   assert.match(workflow, /github-token: \$\{\{ github\.token \}\}/);

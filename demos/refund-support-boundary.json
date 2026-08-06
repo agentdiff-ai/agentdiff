@@ -1,0 +1,181 @@
+{
+  "id": "refund-support-boundary",
+  "title": "Agentdiff refund support demo",
+  "pr": {
+    "owner": "agentdiff-ai",
+    "repo": "agentdiff",
+    "number": 10,
+    "url": "https://github.com/agentdiff-ai/agentdiff/pull/10"
+  },
+  "outputFile": "agentdiff-refund-support-demo.mp4",
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "minDurationSeconds": 35,
+    "maxDurationSeconds": 45
+  },
+  "voice": {
+    "preferred": "Microsoft Zira Desktop",
+    "requireHumanForFinal": true,
+    "sampleRate": 48000,
+    "targetLoudnessLufs": -16,
+    "truePeakDb": -1.5,
+    "highpassHz": 70
+  },
+  "closingLine": "Normal CI tells you whether code still runs. Agentdiff tells you whether the agent's behavior boundary changed.",
+  "shots": [
+    {
+      "id": "01-checks-green",
+      "title": "GitHub PR checks green",
+      "durationSeconds": 4,
+      "url": "https://github.com/agentdiff-ai/agentdiff/pull/10/checks?check_run_id=83094275697",
+      "fallbackUrl": "https://github.com/agentdiff-ai/agentdiff/pull/10",
+      "strategy": "checks",
+      "screenshot": "01-checks-green.png",
+      "caption": "Normal CI is green",
+      "voiceover": "Normal CI tells you if your code still runs.",
+      "expectedText": ["classify", "Demo: support agent refund path"]
+    },
+    {
+      "id": "02-pr-diff",
+      "title": "PR diff",
+      "durationSeconds": 9,
+      "url": "https://github.com/agentdiff-ai/agentdiff/pull/10/files#diff-c3069518e8d3ae8733b4fc4edcc48e00a6aa1809fd71081aa3936d8ebef7aafc",
+      "fallbackUrl": "https://github.com/agentdiff-ai/agentdiff/pull/10/files",
+      "strategy": "diff",
+      "screenshot": "02-pr-diff.png",
+      "caption": "But the agent behavior changed",
+      "voiceover": "But it does not tell you if your agent's behavior changed.",
+      "expectedText": ["escalate_ticket", "issue_refund", "close_ticket"]
+    },
+    {
+      "id": "03-agentdiff-comment",
+      "title": "Agentdiff sticky PR comment",
+      "durationSeconds": 18,
+      "url": "https://github.com/agentdiff-ai/agentdiff/pull/10#issuecomment-4784856372",
+      "captureUrl": "https://github.com/agentdiff-ai/agentdiff/pull/10",
+      "fallbackUrl": "https://github.com/agentdiff-ai/agentdiff/pull/10",
+      "strategy": "comment",
+      "screenshot": "03-agentdiff-comment.png",
+      "caption": "Action required before merge",
+      "voiceover": "Agentdiff catches the behavior boundary change before merge.",
+      "expectedText": ["Action required", "issue_refund", "close_ticket", "escalate_ticket"]
+    },
+    {
+      "id": "04-evidence-loop",
+      "title": "Evidence loop",
+      "durationSeconds": 10,
+      "url": "https://github.com/agentdiff-ai/agentdiff/blob/main/docs/evidence-loop.md",
+      "fallbackUrl": "https://github.com/agentdiff-ai/agentdiff/tree/main/docs",
+      "strategy": "doc",
+      "screenshot": "04-evidence-loop.png",
+      "caption": "Built from real agent behavior regressions",
+      "voiceover": "Built from real agent behavior regressions.",
+      "expectedText": ["Evidence loop", "10 to 22", "verified regression-style cases"]
+    }
+  ],
+  "render": {
+    "mode": "designed",
+    "transitionSeconds": 0.3,
+    "transitions": ["slideleft", "slideleft", "slideleft", "slideleft", "fadeblack"],
+    "scenes": [
+      {
+        "id": "01-ci-green",
+        "kind": "checks",
+        "durationSeconds": 4,
+        "caption": "Normal CI is green",
+        "voiceover": "Normal CI tells you if your code still runs.",
+        "motion": { "zoom": 1.034, "x": 940, "y": 420 },
+        "prTitle": "Demo: support agent refund path",
+        "checkTitle": "Demo support refund boundary",
+        "checks": ["classify", "recorded-harness"],
+        "calloutTitle": "Normal CI is green",
+        "calloutDetail": "Code still runs"
+      },
+      {
+        "id": "02-behavior-diff",
+        "kind": "diff",
+        "durationSeconds": 9,
+        "caption": "But the agent behavior changed",
+        "voiceover": "But it does not tell you if your agent's behavior changed. Here, a support-agent PR moves from escalation to direct customer-visible action.",
+        "motion": { "zoom": 1.04, "x": 1050, "y": 520 },
+        "headline": "Escalation becomes direct refund + close ticket",
+        "subhead": "direct customer-visible action",
+        "file": "examples/demo-support-agent/src/supportAgent.js",
+        "beforeCalls": ["escalate_ticket(ticket)"],
+        "afterCalls": ["issue_refund(ticket)", "close_ticket(ticket)"],
+        "diffLines": [
+          { "tone": "context", "code": "if (classification.category === \"billing\" && ticket.message.includes(\"refund\")) {" },
+          { "tone": "removed", "code": "await tools.escalate_ticket({" },
+          { "tone": "removed", "code": "  ticket_id: ticket.id," },
+          { "tone": "removed", "code": "  reason: \"refund requires human approval\"" },
+          { "tone": "removed", "code": "});" },
+          { "tone": "added", "code": "await tools.issue_refund({" },
+          { "tone": "added", "code": "  customer_id: ticket.customer_id," },
+          { "tone": "added", "code": "  amount_usd: ticket.requested_refund_amount_usd" },
+          { "tone": "added", "code": "});" },
+          { "tone": "added", "code": "await tools.close_ticket({ ticket_id: ticket.id });" }
+        ]
+      },
+      {
+        "id": "03-action-required",
+        "kind": "comment-action",
+        "durationSeconds": 8,
+        "caption": "Action required before merge",
+        "voiceover": "Agentdiff catches that behavior boundary change before merge.",
+        "motion": { "zoom": 1.03, "x": 1120, "y": 450 },
+        "sideTitle": "Action required",
+        "sideDetail": "before merge",
+        "findingTitle": "High-risk agent behavior added",
+        "file": "examples/demo-support-agent/src/supportAgent.js",
+        "summary": {
+          "status": "action_required",
+          "run mode": "classify",
+          "changed surfaces": 1,
+          "diff-aware findings": 1,
+          "action_required": 1,
+          "review_recommended": 1,
+          "context_only": 0
+        }
+      },
+      {
+        "id": "04-action-surface",
+        "kind": "comment-surface",
+        "durationSeconds": 10,
+        "caption": "Native GitHub Action. One sticky comment.",
+        "voiceover": "It posts one native GitHub comment showing exactly what changed. Added: issue refund and close ticket. Removed: escalate ticket.",
+        "motion": { "zoom": 1.032, "x": 1120, "y": 515 },
+        "sideTitle": "Exact action surface",
+        "sideDetail": "changed",
+        "findingTitle": "High-risk agent behavior added",
+        "file": "examples/demo-support-agent/src/supportAgent.js",
+        "addedCalls": ["issue_refund", "close_ticket"],
+        "removedCalls": ["escalate_ticket"],
+        "whyItMatters": "Why it matters: this PR moves refund handling from review/escalation to direct customer-visible action."
+      },
+      {
+        "id": "05-evidence",
+        "kind": "evidence",
+        "durationSeconds": 5,
+        "voiceover": "Built from real agent behavior regressions.",
+        "motion": { "zoom": 1.012, "x": 960, "y": 540 },
+        "headline": "Built from real agent behavior regressions",
+        "added": "Added: issue refund + close ticket",
+        "removed": "Removed: escalate ticket",
+        "proof": "Catches blind spots standard CI misses"
+      },
+      {
+        "id": "06-cta",
+        "kind": "cta",
+        "durationSeconds": 5,
+        "voiceover": "Agentdiff: CI for agent behavior changes.",
+        "motion": { "zoom": 1.01, "x": 960, "y": 540 },
+        "brand": "agentdiff",
+        "tagline": "CI for agent behavior changes",
+        "url": "github.com/agentdiff-ai/agentdiff",
+        "cta": "Try the GitHub Action"
+      }
+    ]
+  }
+}

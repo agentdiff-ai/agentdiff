@@ -2,7 +2,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { analyzeTracePair, buildAgentMap, buildClassificationReport, readJson } from "../../core/src/index.js";
+import {
+  analyzeTracePair,
+  buildAgentMap,
+  buildCapabilityPlan,
+  buildClassificationReport,
+  loadScenarioFile,
+  normalizeCapabilityPolicy,
+  readJson
+} from "../../core/src/index.js";
 import { renderMarkdownReport } from "../../report/src/markdown.js";
 
 main(process.argv.slice(2)).catch((error) => {
@@ -33,6 +41,15 @@ async function main(argv) {
     return;
   }
 
+  if (command === "scenario") {
+    const subcommand = argv[1];
+    if (subcommand !== "validate") throw new Error("usage: agentdiff scenario validate <scenario.json>");
+    const scenarioPath = argv[2] ?? readOption(argv, "--file");
+    if (!scenarioPath) throw new Error("usage: agentdiff scenario validate <scenario.json>");
+    validateScenarioCommand(scenarioPath);
+    return;
+  }
+
   if (command === "classify") {
     const out = readOption(argv, "--out") ?? ".agentdiff/runs/latest";
     const files = await resolveChangedFileInputs(argv);
@@ -44,6 +61,21 @@ async function main(argv) {
     const out = readOption(argv, "--out") ?? ".agentdiff/runs/latest/map.json";
     const root = readOption(argv, "--root") ?? ".";
     await scan({ root, out });
+    return;
+  }
+
+  if (command === "plan") {
+    const out = readOption(argv, "--out") ?? ".agentdiff/runs/latest";
+    if (!readOption(argv, "--files") && (!readOption(argv, "--base") || !readOption(argv, "--head"))) {
+      throw new Error("plan needs either --files or both --base and --head");
+    }
+    const files = await resolveChangedFileInputs(argv);
+    await plan({
+      files,
+      out,
+      policyPath: readOption(argv, "--policy") ?? "agentdiff.policy.json",
+      scenariosPath: readOption(argv, "--scenarios") ?? path.join(".agentdiff", "scenarios")
+    });
     return;
   }
 
@@ -86,6 +118,7 @@ async function init({ force, githubAction }) {
   writeFileSafe("agentdiff.yml", starterConfig(signals), { force });
   writeFileSafe(path.join(".agentdiff", "map.json"), `${JSON.stringify(starterMap(), null, 2)}\n`, { force });
   writeFileSafe(path.join(".agentdiff", "scenarios", "starter.json"), `${JSON.stringify(starterScenario(), null, 2)}\n`, { force });
+  writeFileSafe("agentdiff.policy.json", `${JSON.stringify(starterCapabilityPolicy(), null, 2)}\n`, { force });
   if (githubAction) {
     writeFileSafe(path.join(".github", "workflows", "agentdiff.yml"), starterGitHubWorkflow(), { force });
   }
@@ -93,6 +126,7 @@ async function init({ force, githubAction }) {
   console.log("created agentdiff.yml");
   console.log("created .agentdiff/map.json");
   console.log("created .agentdiff/scenarios/starter.json");
+  console.log("created agentdiff.policy.json");
   if (githubAction) {
     console.log("created .github/workflows/agentdiff.yml");
   }
@@ -136,6 +170,14 @@ async function run({ base, head, out }) {
   console.log(`report: ${path.join(outDir, "report.md")}`);
 }
 
+function validateScenarioCommand(scenarioPath) {
+  const scenario = loadScenarioFile(path.resolve(process.cwd(), scenarioPath));
+  console.log(`valid scenario: ${scenario.id}`);
+  console.log(`title: ${scenario.title}`);
+  console.log(`schema version: ${scenario.schema_version}`);
+  console.log(`expectations: ${scenario.expectations.length}`);
+}
+
 async function runLiveExample({ example }) {
   const harness = process.env.AGENTDIFF_HARNESS || "codex-cli";
   const adapterPath = path.resolve(process.cwd(), "examples", example, "harnesses", `${harness}.js`);
@@ -151,18 +193,7 @@ async function runLiveExample({ example }) {
 
 async function classify({ files, out }) {
   const outDir = path.resolve(process.cwd(), out);
-  const agentMap = readAgentMapIfPresent();
-  const suppressions = readSuppressionRules(process.cwd());
-  const report = buildClassificationReport({
-    repo: path.basename(process.cwd()),
-    suppressions,
-    files: files.map((file) => ({
-      filePath: file.filePath,
-      content: readTextIfPresent(path.resolve(process.cwd(), file.filePath)),
-      diffText: file.diffText,
-      agentMap
-    }))
-  });
+  const report = buildClassificationForInputs(files);
   const markdown = renderMarkdownReport(report);
 
   fs.mkdirSync(outDir, { recursive: true });
@@ -174,6 +205,91 @@ async function classify({ files, out }) {
   console.log(`map drift findings: ${report.map_drift.length}`);
   console.log(`suppressed findings: ${report.suppressed_findings.length}`);
   console.log(`report: ${path.join(outDir, "report.md")}`);
+}
+
+async function plan({ files, out, policyPath, scenariosPath }) {
+  const outDir = path.resolve(process.cwd(), out);
+  const classificationReport = buildClassificationForInputs(files);
+  const policyState = readCapabilityPolicy(policyPath);
+  const scenarios = readScenarioDirectory(scenariosPath);
+  const report = buildCapabilityPlan({
+    classificationReport,
+    policy: policyState.policy,
+    scenarios,
+    policySource: policyState.source,
+    warnings: policyState.warnings
+  });
+  const markdown = renderMarkdownReport(report);
+
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
+  fs.writeFileSync(path.join(outDir, "report.md"), `${markdown}\n`);
+
+  console.log(`agentdiff plan: ${report.decision}`);
+  console.log(`added capabilities: ${report.summary.added_capabilities}`);
+  console.log(`removed guardrails: ${report.summary.removed_guardrails}`);
+  console.log(`covered capabilities: ${report.summary.covered}`);
+  console.log(`uncovered capabilities: ${report.summary.uncovered}`);
+  console.log(`report: ${path.join(outDir, "report.md")}`);
+
+  if (report.decision === "block") process.exitCode = 1;
+}
+
+function buildClassificationForInputs(files) {
+  const agentMap = readAgentMapIfPresent();
+  const suppressions = readSuppressionRules(process.cwd());
+  return buildClassificationReport({
+    repo: path.basename(process.cwd()),
+    suppressions,
+    files: files.map((file) => ({
+      filePath: file.filePath,
+      content: readTextIfPresent(path.resolve(process.cwd(), file.filePath)),
+      diffText: file.diffText,
+      agentMap
+    }))
+  });
+}
+
+function readCapabilityPolicy(policyPath) {
+  const absolutePath = path.resolve(process.cwd(), policyPath);
+  if (!fs.existsSync(absolutePath)) {
+    return {
+      source: policyPath,
+      policy: normalizeCapabilityPolicy({ version: "0.1", defaults: { unmatched: "review" }, rules: [] }, { source: policyPath }),
+      warnings: [`capability policy not found at ${policyPath}; unmatched capabilities require review`]
+    };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(absolutePath, "utf8"));
+  } catch (error) {
+    throw new Error(`could not parse capability policy ${policyPath}: ${error.message}`);
+  }
+
+  return {
+    source: policyPath,
+    policy: normalizeCapabilityPolicy(parsed, { source: policyPath }),
+    warnings: []
+  };
+}
+
+function readScenarioDirectory(scenariosPath) {
+  const absolutePath = path.resolve(process.cwd(), scenariosPath);
+  if (!fs.existsSync(absolutePath)) return [];
+  const files = [];
+
+  function walk(currentPath) {
+    for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
+      const entryPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) walk(entryPath);
+      else if (entry.isFile() && entry.name.endsWith(".json")) files.push(entryPath);
+    }
+  }
+
+  if (fs.statSync(absolutePath).isDirectory()) walk(absolutePath);
+  else if (absolutePath.endsWith(".json")) files.push(absolutePath);
+  return files.sort().map((filePath) => loadScenarioFile(filePath));
 }
 
 async function scan({ root, out }) {
@@ -1239,14 +1355,38 @@ jobs:
 
       # Recommended v0 channel. Pin @v0.1.0 for an immutable exact version.
       # For local development inside this repo, the equivalent command is:
-      # node packages/cli/bin/agentdiff.js classify --base origin/\${{ github.base_ref }} --head HEAD
+      # node packages/cli/bin/agentdiff.js plan --base origin/\${{ github.base_ref }} --head HEAD
       - uses: agentdiff-ai/agentdiff@v0
         with:
-          command: classify
+          command: plan
           base: origin/\${{ github.base_ref }}
           head: HEAD
           github-token: \${{ github.token }}
 `;
+}
+
+function starterCapabilityPolicy() {
+  return {
+    version: "0.1",
+    defaults: {
+      unmatched: "review"
+    },
+    rules: [
+      {
+        id: "starter-high-risk-tool",
+        capability: "replace_with_high_risk_tool",
+        reason: "This capability requires an explicit approval scenario.",
+        require: {
+          scenarios: ["starter_scenario"],
+          confirmation: true
+        },
+        decision: {
+          covered: "review",
+          uncovered: "block"
+        }
+      }
+    ]
+  };
 }
 
 function dedupe(values) {
@@ -1306,10 +1446,26 @@ function starterMap() {
 
 function starterScenario() {
   return {
+    schema_version: "0.1",
     id: "starter_scenario",
+    title: "Review one critical agent behavior",
+    agent_id: "replace_with_agent_id",
     input: "Describe one user workflow your agent should handle safely.",
     fixture: {},
-    expectations: []
+    expectations: [
+      {
+        type: "must_not_call",
+        tool: "replace_with_high_risk_tool"
+      },
+      {
+        type: "requires_confirmation",
+        before_tool: "replace_with_high_risk_tool"
+      }
+    ],
+    source: {
+      type: "user_defined",
+      evidence: ["Generated by agentdiff init; edit this scenario before running a harness."]
+    }
   };
 }
 
@@ -1320,7 +1476,7 @@ CI for agent behavior changes.
 
 Commands:
   agentdiff init [--force] [--github-action]
-    Create agentdiff.yml, .agentdiff/map.json, and a starter scenario.
+    Create config, capability policy, agent map, and a starter scenario.
 
   agentdiff classify --files <path,path> [--out <dir>]
     Classify changed files and write report.json + report.md.
@@ -1328,8 +1484,14 @@ Commands:
   agentdiff classify --base <ref> --head <ref> [--out <dir>]
     Classify files changed between two git refs.
 
+  agentdiff plan --base <ref> --head <ref> [--policy <file>] [--scenarios <dir>] [--out <dir>]
+    Plan added capabilities against policy and scenario coverage. Blocks uncovered changes.
+
   agentdiff scan [--root <dir>] [--out <map.json>]
     Scan the repo and write a map artifact. Defaults to .agentdiff/runs/latest/map.json.
+
+  agentdiff scenario validate <scenario.json>
+    Validate and normalize a scenario against the shared v0 contract.
 
   agentdiff operator [--execute] [--task tests|demo|classify]
     Summarize local project state and propose the next allowed action. Dry-run by default.
